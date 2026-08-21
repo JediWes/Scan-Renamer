@@ -1,0 +1,23 @@
+# Configurações locais (contêm caminhos da máquina)
+cartorio_config.json
+scanner_presets.json
+
+# Arquivos temporários de scan
+*.tif
+*.tiff
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+build/
+dist/
+*.spec
+
+# PyInstaller
+Renomeador_Cartorio.exe
+
+# Windows
+Thumbs.db
+desktop.ini
