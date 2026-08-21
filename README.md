@@ -1,6 +1,6 @@
-# Renomeador de Declarações — Cartório Santa Cruz
+# Renomeador de Declarações 
 
-Sistema desktop desenvolvido em Python para automatização do fluxo de digitalização e renomeação de documentos no **Cartório Santa Cruz – 2° Subdistrito (Campinas/SP)**.
+Sistema desktop desenvolvido em Python para automatização do fluxo de digitalização e renomeação de documentos em cartório.
 
 ## Funcionalidades
 
