@@ -3,9 +3,11 @@ import os
 import re
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 
 from ..tema import T, FONT, FONT_SM, FONT_XS
+from . import anim
+from .widgets import Botao, CampoTexto
 
 try:
     from watchdog.observers.winapi import WindowsApiObserver as Observer
@@ -23,10 +25,11 @@ from .visualizador import JanelaVisualizacao
 class AbaDeclaracao(tk.Frame):
     PW = 180; PH = 155
 
-    def __init__(self, parent, tipo, app_log, get_prefs):
+    def __init__(self, parent, tipo, app_log, get_prefs, notificar=None):
         super().__init__(parent, bg=T("PANEL"))
         self.tipo = tipo; self.app_log = app_log; self.get_prefs = get_prefs
-        self.observer = None; self.monitorando = False
+        self.notificar = notificar or (lambda *a, **k: None)
+        self.observer = None; self.handler = None; self.monitorando = False
         self.proximo_numero = 0; self.total_renomeados = 0
         # Protege a numeracao entre monitoramento, lote e scanner
         self.lock_numero = threading.RLock()
@@ -47,117 +50,114 @@ class AbaDeclaracao(tk.Frame):
 
         # Esquerda
         left = tk.Frame(root, bg=T("PANEL"))
-        left.pack(side="left", fill="both", expand=True, padx=(0, 14))
+        left.pack(side="left", fill="both", expand=True, padx=(0, 16))
 
-        self._lbl(left, "PASTA DE DESTINO")
+        self._lbl(left, "PASTA MONITORADA")
         rp = tk.Frame(left, bg=T("PANEL"))
         rp.pack(fill="x", pady=(4, 4))
-        tk.Entry(rp, textvariable=self.pasta_var, font=FONT,
-                 bg=T("ENTRY_BG"), fg=T("TEXT"), insertbackground=T("TEXT"),
-                 relief="flat", bd=0,
-                 highlightbackground=T("BORDER"), highlightthickness=1
-                 ).pack(side="left", fill="x", expand=True, ipady=9, padx=(0, 8))
-        tk.Button(rp, text="Procurar", font=FONT_SM,
-                  bg=T("ACCENT"), fg=T("TEXT_ON_ACCENT"), relief="flat", cursor="hand2",
-                  padx=10, pady=6, bd=0,
-                  activebackground=T("ACCENT2"), activeforeground=T("TEXT_ON_ACCENT"),
-                  command=self._escolher_pasta).pack(side="right")
+        CampoTexto(rp, self.pasta_var, exemplo="Escolha a pasta onde o scanner salva os arquivos",
+                   font=FONT).pack(side="left", fill="x", expand=True, ipady=8, padx=(0, 8))
+        Botao(rp, "Procurar", self._escolher_pasta, dica="Escolher pasta  (Ctrl+O)").pack(side="right")
 
         cr = tk.Frame(left, bg=T("PANEL"))
-        cr.pack(fill="x", pady=(2, 12))
-        tk.Label(cr, text="Arquivos na pasta:", font=FONT_XS,
+        cr.pack(fill="x", pady=(4, 12))
+        tk.Label(cr, text="Arquivos já numerados:", font=FONT_XS,
                  bg=T("PANEL"), fg=T("MUTED")).pack(side="left")
         tk.Label(cr, textvariable=self.count_var, font=("Consolas", 9, "bold"),
                  bg=T("PANEL"), fg=T("OK")).pack(side="left", padx=5)
-        tk.Button(cr, text="Atualizar", font=FONT_XS,
-                  bg=T("PANEL"), fg=T("MUTED"), relief="flat", cursor="hand2",
-                  bd=0, padx=3,
-                  activebackground=T("CARD"), activeforeground=T("TEXT"),
-                  command=self._atualizar_contador_pasta).pack(side="left")
-        tk.Button(cr, text="Lote", font=FONT_XS,
-                  bg=T("BTN_SEC_BG"), fg=T("BTN_SEC_FG"), relief="flat", cursor="hand2",
-                  padx=8, pady=2, bd=0,
-                  activebackground=T("ACCENT"), activeforeground=T("TEXT_ON_ACCENT"),
-                  command=self._abrir_lote).pack(side="right")
+        Botao(cr, "Atualizar", self._atualizar_contador_pasta, variante="fantasma", tamanho="sm",
+              dica="Contar novamente os arquivos imageNNNNNN da pasta").pack(side="left")
+        Botao(cr, "Renomear em lote", self._abrir_lote, variante="secundario", tamanho="sm",
+              dica="Renomeia de uma vez os arquivos da pasta que ainda não seguem o padrão"
+              ).pack(side="right")
 
         tk.Frame(left, bg=T("SEP"), height=1).pack(fill="x", pady=(0, 12))
 
-        self._lbl(left, "PRÓXIMO A SER ESCANEADO")
+        self._lbl(left, "PRÓXIMO NÚMERO")
         rn = tk.Frame(left, bg=T("PANEL"))
         rn.pack(fill="x", pady=(4, 12))
-        tk.Entry(rn, textvariable=self.num_var,
-                 font=("Consolas", 13, "bold"),
-                 bg=T("ENTRY_BG"), fg=T("OK"), insertbackground=T("OK"),
-                 relief="flat", bd=0,
-                 highlightbackground=T("BORDER"), highlightthickness=1,
-                 width=15).pack(side="left", ipady=8, padx=(0, 8))
-        tk.Button(rn, text="Verificar", font=FONT_SM,
-                  bg=T("ACCENT"), fg=T("TEXT_ON_ACCENT"), relief="flat", cursor="hand2",
-                  padx=10, pady=6, bd=0,
-                  activebackground=T("ACCENT2"), activeforeground=T("TEXT_ON_ACCENT"),
-                  command=self._verificar_numeracao).pack(side="left")
-        tk.Label(rn, text="image+6 dígitos", font=FONT_XS,
-                 bg=T("PANEL"), fg=T("MUTED")).pack(side="left", padx=10)
+        self._num_entry = tk.Entry(rn, textvariable=self.num_var,
+                                   font=("Consolas", 14, "bold"),
+                                   bg=T("ENTRY_BG"), fg=T("OK"), insertbackground=T("OK"),
+                                   relief="flat", bd=0, justify="center",
+                                   highlightbackground=T("BORDER"), highlightcolor=T("ACCENT"),
+                                   highlightthickness=1, width=14)
+        self._num_entry.pack(side="left", ipady=7, padx=(0, 8))
+        Botao(rn, "Detectar", self._verificar_numeracao, variante="secundario",
+              dica="Procura o maior imageNNNNNN da pasta e sugere o seguinte  (F2)").pack(side="left")
+        tk.Label(rn, text="formato: image + 6 dígitos", font=FONT_XS,
+                 bg=T("PANEL"), fg=T("MUTED")).pack(side="left", padx=12)
+        self.num_var.trace_add("write", lambda *_: self._realcar_numero())
 
         tk.Frame(left, bg=T("SEP"), height=1).pack(fill="x", pady=(0, 12))
 
-        self.btn_var = tk.StringVar(value="Iniciar  [F5]")
-        self.btn = tk.Button(left, textvariable=self.btn_var,
-                             font=("Segoe UI", 11, "bold"),
-                             bg=T("SUCCESS"), fg=T("TEXT_ON_ACCENT"),
-                             relief="flat", cursor="hand2",
-                             padx=20, pady=12, bd=0,
-                             activebackground=T("DANGER"), activeforeground=T("TEXT_ON_ACCENT"),
-                             command=self._toggle)
+        self.btn_var = tk.StringVar(value="Iniciar monitoramento  [F5]")
+        self.btn = Botao(left, comando=self._toggle, tamanho="lg", textvariable=self.btn_var,
+                         largura=200)
         self.btn.pack(fill="x", pady=(0, 8))
 
         self.lbl_notif = tk.Label(left, text="", font=("Segoe UI", 9, "bold"),
-                                   bg=T("NOTIF_BG"), fg=T("NOTIF_FG"),
-                                   anchor="center", pady=4)
+                                  bg=T("NOTIF_BG"), fg=T("NOTIF_FG"),
+                                  anchor="center", pady=5)
 
         bar = tk.Frame(left, bg=T("CARD"),
                        highlightbackground=T("BORDER"), highlightthickness=1)
         bar.pack(fill="x")
         self._dot = tk.Frame(bar, bg=T("MUTED"), width=4)
         self._dot.pack(side="left", fill="y")
+        self._resp = anim.Respiracao(self._dot, "bg", T("OK"), anim.misturar(T("OK"), T("CARD"), 0.75))
         tk.Label(bar, text="STATUS", font=("Segoe UI", 7, "bold"),
                  bg=T("CARD"), fg=T("MUTED")).pack(side="left", padx=(10, 6), pady=7)
-        self.lbl_status = tk.Label(bar, text="Aguardando…",
-                                   font=FONT_SM, bg=T("CARD"), fg=T("SUBTEXT"))
+        self.lbl_status = tk.Label(bar, text="Parado", font=FONT_SM, bg=T("CARD"), fg=T("SUBTEXT"))
         self.lbl_status.pack(side="left")
-        self.lbl_counter = tk.Label(bar, text="",
-                                    font=("Consolas", 9, "bold"),
+        self.lbl_counter = tk.Label(bar, text="", font=("Consolas", 9, "bold"),
                                     bg=T("CARD"), fg=T("OK"))
         self.lbl_counter.pack(side="right", padx=10)
 
-        # Direita — preview
+        # Direita: ultimo arquivo
         right = tk.Frame(root, bg=T("CARD2"),
                          highlightbackground=T("BORDER"), highlightthickness=1,
                          width=self.PW)
         right.pack(side="right", fill="y")
         right.pack_propagate(False)
-        tk.Label(right, text="ÚLTIMO ESCANEADO", font=("Segoe UI", 7, "bold"),
+        tk.Label(right, text="ÚLTIMO ARQUIVO", font=("Segoe UI", 7, "bold"),
                  bg=T("CARD2"), fg=T("MUTED")).pack(pady=(10, 4))
         self._pcv = tk.Canvas(right, width=self.PW-20, height=self.PH,
-                               bg=T("CARD"), highlightthickness=0, cursor="hand2")
+                              bg=T("CARD"), highlightthickness=0, cursor="hand2")
         self._pcv.pack(padx=10)
         self._pcv.bind("<Button-1>", self._abrir_visualizacao)
         self._prev_ref = None
         self._placeholder()
         self.lbl_pnome = tk.Label(right, text="—", font=("Consolas", 8),
-                                   bg=T("CARD2"), fg=T("MUTED"),
-                                   wraplength=self.PW-16, justify="center")
+                                  bg=T("CARD2"), fg=T("MUTED"),
+                                  wraplength=self.PW-16, justify="center")
         self.lbl_pnome.pack(pady=(6, 4), padx=6)
-        tk.Button(right, text="Ver tamanho real", font=FONT_XS,
-                  bg=T("ACCENT"), fg=T("TEXT_ON_ACCENT"), relief="flat", cursor="hand2",
-                  padx=8, pady=5, bd=0,
-                  activebackground=T("ACCENT2"), activeforeground=T("TEXT_ON_ACCENT"),
-                  command=self._abrir_visualizacao_btn).pack(fill="x", padx=10, pady=(4, 3))
-        tk.Button(right, text="Abrir pasta no Explorer", font=FONT_XS,
-                  bg=T("BTN_SEC_BG"), fg=T("BTN_SEC_FG"), relief="flat", cursor="hand2",
-                  padx=8, pady=5, bd=0,
-                  activebackground=T("ACCENT"), activeforeground=T("TEXT_ON_ACCENT"),
-                  command=self._abrir_pasta).pack(fill="x", padx=10, pady=(0, 10))
+        Botao(right, "Ampliar", self._abrir_visualizacao_btn, tamanho="sm",
+              dica="Abrir o último arquivo em tamanho real").pack(fill="x", padx=10, pady=(4, 4))
+        Botao(right, "Abrir pasta", self._abrir_pasta, variante="secundario", tamanho="sm",
+              dica="Abrir a pasta no Explorer").pack(fill="x", padx=10, pady=(0, 10))
+
+    def ao_exibir(self):
+        """Chamado quando a aba fica visivel."""
+        if self.pasta_valida():
+            self._atualizar_contador_pasta()
+
+    def _realcar_numero(self):
+        anim.realcar(self._num_entry, "bg", T("NOTIF_BG"), T("ENTRY_BG"), 900)
+
+    def _visual_monitorando(self, ativo):
+        if ativo:
+            self.btn_var.set("Parar monitoramento  [F5]")
+            self.btn.configure(variante="perigo")
+            self._resp.iniciar()
+            p = self.pasta_var.get().strip()
+            self.lbl_status.configure(text=f"Monitorando  ·  {os.path.basename(p) or p}", fg=T("OK"))
+        else:
+            self.btn_var.set("Iniciar monitoramento  [F5]")
+            self.btn.configure(variante="primario")
+            self._resp.parar()
+            anim.animar_cor(self._dot, "bg", T("MUTED"), 300)
+            self.lbl_status.configure(text="Parado", fg=T("SUBTEXT"))
 
     def _lbl(self, p, t):
         tk.Label(p, text=t, font=("Segoe UI", 8, "bold"),
@@ -175,10 +175,10 @@ class AbaDeclaracao(tk.Frame):
         self._ultimo_caminho = caminho
         def _show():
             self.lbl_notif.configure(text=nome)
-            self.lbl_notif.pack(fill="x", pady=(0, 6))
+            self.lbl_notif.pack(fill="x", pady=(0, 6), before=self.btn)
+            anim.realcar(self.lbl_notif, "bg", T("ACCENT"), T("NOTIF_BG"), 700)
             if self._flash_job: self.after_cancel(self._flash_job)
             self._flash_job = self.after(4000, _hide)
-            self._pulsar_btn(3)
             threading.Thread(target=self._load_preview, args=(caminho, nome), daemon=True).start()
         def _hide():
             self.lbl_notif.pack_forget(); self._flash_job = None
@@ -218,7 +218,7 @@ class AbaDeclaracao(tk.Frame):
         if p and os.path.isdir(p):
             os.startfile(p)
         else:
-            messagebox.showwarning("Pasta inválida", "Configure a pasta primeiro.", parent=self)
+            self.notificar("Pasta não configurada", f"Escolha a pasta de {self.tipo} primeiro.", "aviso")
 
     def _abrir_visualizacao(self, event=None):
         if self._ultimo_caminho and os.path.exists(self._ultimo_caminho):
@@ -228,13 +228,12 @@ class AbaDeclaracao(tk.Frame):
         if self._ultimo_caminho and os.path.exists(self._ultimo_caminho):
             JanelaVisualizacao(self, self._ultimo_caminho)
         else:
-            messagebox.showinfo("Sem arquivo", "Nenhum arquivo escaneado ainda.", parent=self)
+            self.notificar("Nenhum arquivo ainda", "O último arquivo renomeado aparece aqui.", "info")
 
     def _abrir_lote(self):
         p = self.pasta_var.get().strip()
         if not p or not os.path.isdir(p):
-            messagebox.showerror("Pasta inválida",
-                                 "Configure a pasta antes de usar o modo lote.", parent=self)
+            self.notificar("Pasta não configurada", "Escolha a pasta antes de renomear em lote.", "aviso")
             return
         prefs = self.get_prefs()
         JanelaLote(self, self.tipo, p,
@@ -247,12 +246,6 @@ class AbaDeclaracao(tk.Frame):
         self.num_var.set(f"image{novo_proximo:06d}")
         self._atualizar_contador_pasta()
         self._persistir()
-
-    def _pulsar_btn(self, vezes):
-        if vezes <= 0 or not self.monitorando: return
-        self.btn.configure(bg=T("OK"), fg=T("TEXT_ON_ACCENT"))
-        self.after(150, lambda: self.btn.configure(bg=T("DANGER"), fg=T("TEXT_ON_ACCENT")))
-        self.after(300, lambda: self._pulsar_btn(vezes - 1))
 
     def _atualizar_contador_pasta(self):
         p = self.pasta_var.get().strip()
@@ -273,16 +266,16 @@ class AbaDeclaracao(tk.Frame):
     def _verificar_numeracao(self, silencioso=False):
         p = self.pasta_var.get().strip()
         if not p or not os.path.isdir(p):
-            if not silencioso: messagebox.showwarning("Pasta inválida", "Configure a pasta antes de verificar.")
+            if not silencioso: self.notificar("Pasta não configurada", "Escolha a pasta antes de detectar a numeração.", "aviso")
             return
         prox = detectar_proximo_numero(p)
         if prox is None:
-            if not silencioso: messagebox.showinfo("Nenhum arquivo", "Nenhum image000000 encontrado.\nNumeração mantida.")
+            if not silencioso: self.notificar("Nenhum arquivo numerado", "A numeração atual foi mantida.", "info")
             return
         self.num_var.set(f"image{prox:06d}")
         if not silencioso:
-            messagebox.showinfo("Numeração detectada",
-                                f"Último: image{prox-1:06d}\nPróximo: image{prox:06d}")
+            self.notificar("Numeração detectada",
+                           f"Último: image{prox-1:06d}   ·   Próximo: image{prox:06d}", "ok")
 
     def _toggle(self):
         if self.monitorando: self._parar()
@@ -291,11 +284,12 @@ class AbaDeclaracao(tk.Frame):
     def _iniciar(self):
         p = self.pasta_var.get().strip()
         if not p or not os.path.isdir(p):
-            messagebox.showerror("Pasta inválida", f"Configure a pasta de '{self.tipo}' antes de iniciar.")
+            self.notificar("Pasta não configurada", f"Escolha a pasta de {self.tipo} antes de iniciar.", "erro")
             return
         m = re.fullmatch(r"image(\d{6})", self.num_var.get().strip().lower())
         if not m:
-            messagebox.showerror("Numeração inválida", "Use: image + 6 dígitos\nEx: image397568")
+            self.notificar("Numeração inválida", "Use image seguido de 6 dígitos, por exemplo image397568.", "erro")
+            anim.realcar(self._num_entry, "bg", anim.misturar(T("ERR"), T("ENTRY_BG"), 0.6), T("ENTRY_BG"), 1200)
             return
         prefs = self.get_prefs()
         self.proximo_numero = int(m.group(1)); self.total_renomeados = 0
@@ -304,26 +298,22 @@ class AbaDeclaracao(tk.Frame):
         self.log(f"   Pasta: {p}", "info")
         self.log(f"   A partir de: image{self.proximo_numero:06d}", "info")
         self.log("──────────────────────────────────────────────────", "info")
-        handler = RenomeadorHandler(self,
+        handler = self.handler = RenomeadorHandler(self,
             extensoes=prefs.get("extensoes", EXTENSOES_PADRAO),
             delay=prefs.get("delay", 0.3))
         self.observer = Observer()
         self.observer.schedule(handler, p, recursive=False)
         self.observer.start()
         self.monitorando = True
-        self.btn_var.set("Parar  [F5]")
-        self.btn.configure(bg=T("DANGER"), activebackground=T("DANGER_HOVER"))
-        self._dot.configure(bg=T("OK"))
-        self.lbl_status.configure(text=f"Monitorando  ·  {os.path.basename(p)}", fg=T("OK"))
+        self._visual_monitorando(True)
+        self.notificar(f"Monitorando {self.tipo}", p, "ok")
 
     def _parar(self):
         if self.observer:
             self.observer.stop(); self.observer.join(); self.observer = None
+        self.handler = None
         self.monitorando = False
-        self.btn_var.set("Iniciar  [F5]")
-        self.btn.configure(bg=T("SUCCESS"), activebackground=T("DANGER"))
-        self._dot.configure(bg=T("MUTED"))
-        self.lbl_status.configure(text="Monitoramento encerrado.", fg=T("SUBTEXT"))
+        self._visual_monitorando(False)
         self.log("── Monitoramento encerrado ───────────────────────", "info")
         self._atualizar_contador_pasta(); self._persistir()
 

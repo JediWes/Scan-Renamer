@@ -11,6 +11,7 @@ Sistema desktop desenvolvido em Python para automatização do fluxo de digitali
 - **Histórico e desfazer** — toda renomeação e digitalização fica registrada em `historico.csv`; a última renomeação pode ser desfeita (Ctrl+Z)
 - **Visualizador** — preview de imagens e PDFs com zoom
 - **Modo lote** — renomeia arquivos já existentes na pasta
+- **Interface animada** — abas e seletor deslizantes, avisos que entram e saem suavemente, botões com transição de cor, status pulsando durante o monitoramento e barra de atividade durante o scan
 - **Temas** — modo escuro e claro, com tamanho de janela e aba lembrados
 - **Instância única** — abrir o app de novo traz a janela já aberta para frente
 
@@ -43,6 +44,8 @@ cartorio/
   instancia.py           instância única
   logo_data.py           logo embutida
   ui/                    janelas e abas (Tkinter)
+    anim.py              motor de animação (curvas, cores, transições)
+    widgets.py           botão, abas, seletor, avisos, dicas, barra de atividade
 assets/                  logo vetorizada (SVG) e PNG
 ```
 

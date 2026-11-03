@@ -14,6 +14,8 @@ from ..constantes import TIPOS
 from ..scanner import (MODOS_COR_LABEL, pagina_em_branco, scanner_listar_dispositivos,
                        scanner_uma_pagina, tifs_para_pdf)
 from ..tema import T, FONT_SM, FONT_XS
+from . import anim
+from .widgets import BarraAtividade, Botao, CampoTexto
 
 PRESET_MANUAL = "-- manual --"
 
@@ -30,10 +32,11 @@ DESTINO_TIPO = {v: k for k, v in DESTINO_ROTULO.items()}
 class AbaScanner(tk.Frame):
     RESOLUCOES = ["100", "150", "200", "300", "400", "600"]
 
-    def __init__(self, parent, log_callback, obter_aba=None):
+    def __init__(self, parent, log_callback, obter_aba=None, notificar=None):
         """obter_aba(tipo) devolve a AbaDeclaracao do tipo, para salvar como imageNNNNNN."""
         super().__init__(parent, bg=T("BG"))
         self.log_cb        = log_callback
+        self.notificar     = notificar or (lambda *a, **k: None)
         self._obter_aba    = obter_aba or (lambda tipo: None)
         self._presets      = carregar_presets()
         self._dispositivos = []
@@ -66,8 +69,8 @@ class AbaScanner(tk.Frame):
                                  font=FONT_SM, bg=T("CARD"), fg=T("SUBTEXT"),
                                  padx=10, pady=6, anchor="w")
         self._dev_lbl.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        self._botao(dev_row, "Detectar novamente", self._detectar_dispositivos,
-                    secundario=True).pack(side="right")
+        Botao(dev_row, "Detectar novamente", self._detectar_dispositivos, variante="secundario",
+              dica="Procura de novo scanners conectados").pack(side="right")
 
         self._sep(left)
 
@@ -81,8 +84,10 @@ class AbaScanner(tk.Frame):
         self._preset_cb.bind("<<ComboboxSelected>>",
                              lambda e: self._carregar_preset(self.preset_var.get()))
         self._preset_cb.pack(side="left", fill="x", expand=True, padx=(0, 6))
-        self._botao(pr, "Salvar", self._salvar_preset, secundario=True).pack(side="left", padx=(0, 4))
-        self._botao(pr, "Excluir", self._excluir_preset, secundario=True).pack(side="left")
+        Botao(pr, "Salvar", self._salvar_preset, variante="secundario",
+              dica="Guarda as opções atuais com um nome").pack(side="left", padx=(0, 4))
+        Botao(pr, "Excluir", self._excluir_preset, variante="secundario",
+              dica="Remove o preset selecionado").pack(side="left")
 
         self._sep(left)
 
@@ -134,13 +139,9 @@ class AbaScanner(tk.Frame):
 
         self._dest_pasta = tk.Frame(left, bg=T("BG"))
         self.dest_var = tk.StringVar(value="")
-        tk.Entry(self._dest_pasta, textvariable=self.dest_var,
-                 font=FONT_SM, bg=T("ENTRY_BG"), fg=T("TEXT"),
-                 insertbackground=T("TEXT"), relief="flat", bd=0,
-                 highlightbackground=T("BORDER"), highlightcolor=T("ACCENT"),
-                 highlightthickness=1
-                 ).pack(side="left", fill="x", expand=True, ipady=7, padx=(0, 8))
-        self._botao(self._dest_pasta, "Procurar", self._escolher_pasta).pack(side="right")
+        CampoTexto(self._dest_pasta, self.dest_var, exemplo="Escolha onde salvar os PDFs"
+                   ).pack(side="left", fill="x", expand=True, ipady=7, padx=(0, 8))
+        Botao(self._dest_pasta, "Procurar", self._escolher_pasta).pack(side="right")
 
         self._dest_info = tk.Label(left, text="", font=FONT_SM, bg=T("CARD"),
                                    fg=T("SUBTEXT"), anchor="w", justify="left",
@@ -148,16 +149,12 @@ class AbaScanner(tk.Frame):
 
         # Coluna direita: botao + status
         tk.Frame(right, bg=T("BG"), height=20).pack()
-        self._btn_scan = tk.Button(right, text="Digitalizar\n[F7]",
-                                   font=("Segoe UI", 14, "bold"),
-                                   bg=T("SUCCESS"), fg=T("TEXT_ON_ACCENT"),
-                                   disabledforeground=T("HDR_FG"),
-                                   relief="flat", cursor="hand2",
-                                   padx=20, pady=30, bd=0,
-                                   activebackground=T("ACCENT2"),
-                                   activeforeground=T("TEXT_ON_ACCENT"),
-                                   command=self._iniciar_sessao)
-        self._btn_scan.pack(fill="x", padx=10, pady=(0, 16))
+        self._btn_scan = Botao(right, "Digitalizar", self._iniciar_sessao, tamanho="xl",
+                               largura=220, dica="Digitaliza a folha inserida no scanner  (F7)")
+        self._btn_scan.pack(fill="x", padx=10, pady=(0, 0))
+        tk.Label(right, text="F7", font=FONT_XS, bg=T("BG"), fg=T("MUTED")).pack(pady=(4, 0))
+        self._atividade = BarraAtividade(right)
+        self._atividade.pack(fill="x", padx=10, pady=(6, 10))
 
         status_frame = tk.Frame(right, bg=T("CARD"),
                                 highlightbackground=T("BORDER"), highlightthickness=1)
@@ -170,31 +167,22 @@ class AbaScanner(tk.Frame):
                  wraplength=200, justify="left", padx=8, pady=8).pack(side="left")
 
         self._pags_var = tk.StringVar(value="")
-        tk.Label(right, textvariable=self._pags_var,
+        self._lbl_pags = tk.Label(right, textvariable=self._pags_var,
                  font=("Consolas", 9, "bold"),
-                 bg=T("BG"), fg=T("OK")).pack(padx=10, anchor="w")
+                 bg=T("BG"), fg=T("OK"))
+        self._lbl_pags.pack(padx=10, anchor="w")
 
         # Acoes da sessao: concluir ou descartar paginas acumuladas
         acoes = tk.Frame(right, bg=T("BG"))
         acoes.pack(fill="x", padx=10, pady=(8, 0))
-        self._btn_concluir = self._botao(acoes, "Salvar PDF agora", self._finalizar_pdf)
+        self._btn_concluir = Botao(acoes, "Salvar PDF agora", self._finalizar_pdf,
+                                   dica="Gera o PDF com as páginas acumuladas")
         self._btn_concluir.pack(fill="x", pady=(0, 4))
-        self._btn_descartar = self._botao(acoes, "Descartar páginas", self._descartar_sessao,
-                                          secundario=True)
+        self._btn_descartar = Botao(acoes, "Descartar páginas", self._descartar_sessao,
+                                    variante="secundario")
         self._btn_descartar.pack(fill="x")
         self._atualizar_botoes_sessao()
         self._atualizar_opcoes()
-
-    def _botao(self, pai, texto, comando, secundario=False):
-        if secundario:
-            cores = dict(bg=T("BTN_SEC_BG"), fg=T("BTN_SEC_FG"),
-                         activebackground=T("BORDER"), activeforeground=T("TEXT"))
-        else:
-            cores = dict(bg=T("ACCENT"), fg=T("TEXT_ON_ACCENT"),
-                         activebackground=T("ACCENT2"), activeforeground=T("TEXT_ON_ACCENT"))
-        return tk.Button(pai, text=texto, font=FONT_SM, relief="flat", cursor="hand2",
-                         padx=10, pady=5, bd=0, disabledforeground=T("MUTED"),
-                         command=comando, **cores)
 
     def _check(self, pai, texto, var, linha, coluna, comando=None):
         c = tk.Checkbutton(pai, variable=var, text=texto, font=FONT_SM,
@@ -370,6 +358,7 @@ class AbaScanner(tk.Frame):
         self._atualizar_menu_presets()
         self.preset_var.set(nome)
         self._set_status("Preset salvo: " + nome)
+        self.notificar("Preset salvo", nome, "ok")
 
     def _excluir_preset(self):
         nome = self.preset_var.get()
@@ -389,7 +378,7 @@ class AbaScanner(tk.Frame):
     def _set_status(self, txt, cor=None):
         self._status_var.set(txt)
         if cor:
-            self._dot.configure(bg=cor)
+            anim.animar_cor(self._dot, "bg", cor, 250, chave="status")
 
     def _limpar_sessao(self):
         self._tifs_sessao = []
@@ -401,8 +390,7 @@ class AbaScanner(tk.Frame):
 
     def _atualizar_botoes_sessao(self):
         ativo = bool(self._tifs_sessao) and not self._ocupado
-        self._btn_concluir.configure(state="normal" if ativo else "disabled",
-                                     bg=T("ACCENT") if ativo else T("CARD"))
+        self._btn_concluir.configure(state="normal" if ativo else "disabled")
         self._btn_descartar.configure(state="normal" if ativo else "disabled")
 
     def _descartar_sessao(self):
@@ -415,6 +403,7 @@ class AbaScanner(tk.Frame):
             return
         self._limpar_sessao()
         self._set_status("Páginas descartadas.")
+        self.notificar("Páginas descartadas", tipo="aviso")
 
     def digitalizar(self):
         """Atalho F7: inicia a digitalizacao se o scanner estiver pronto."""
@@ -426,7 +415,7 @@ class AbaScanner(tk.Frame):
             tipo = self._tipo_destino()
             msg = (f"Configure a pasta de {tipo} na aba Renomeador antes de digitalizar."
                    if tipo else "Selecione uma pasta de destino existente antes de digitalizar.")
-            messagebox.showerror("Pasta inválida", msg, parent=self.winfo_toplevel())
+            self.notificar("Pasta de destino inválida", msg, "erro")
             return
         self._salvar_ultimo()
         if self._tmp_dir is None:
@@ -436,6 +425,7 @@ class AbaScanner(tk.Frame):
         self._btn_scan.configure(state="disabled")
         self._atualizar_botoes_sessao()
         self._set_status("Digitalizando…", T("WARN"))
+        self._atividade.iniciar()
         self.update_idletasks()
         modo_cor  = MODOS_COR_LABEL.get(COR_CHAVE.get(self.cor_var.get(), "Colorido"), "cor")
         res       = int(self.res_var.get())
@@ -482,13 +472,18 @@ class AbaScanner(tk.Frame):
 
     def _pos_scan(self, novos, removidas, multipag):
         self._ocupado = False
+        self._atividade.parar()
         self._tifs_sessao.extend(novos)
         n = len(self._tifs_sessao)
         self._pags_var.set(f"{n} página(s) acumulada(s)" if n else "")
+        if n:
+            anim.realcar(self._lbl_pags, "fg", T("TEXT"), T("OK"), 700)
         self._btn_scan.configure(state="normal")
         self._atualizar_botoes_sessao()
         if removidas:
             self.log_cb(f"{removidas} verso(s) em branco removido(s).", "info")
+            self.notificar("Verso em branco removido",
+                           f"{removidas} página(s) vazia(s) não entraram no PDF.", "info")
         if not n:
             self._set_status("Nenhuma página com conteúdo.", T("WARN"))
             return
@@ -506,11 +501,12 @@ class AbaScanner(tk.Frame):
 
     def _erro_scan(self, msg):
         self._ocupado = False
+        self._atividade.parar()
         self._btn_scan.configure(state="normal")
         self._atualizar_botoes_sessao()
         self._set_status("Erro: " + msg[:60], T("DANGER"))
-        messagebox.showerror("Erro no scanner", "Falha ao digitalizar:\n\n" + msg,
-                             parent=self.winfo_toplevel())
+        self.notificar("Falha ao digitalizar", msg, "erro", duracao_ms=8000)
+        self.log_cb("Falha ao digitalizar: " + msg, "err")
 
     def _caminho_pasta_livre(self, pasta):
         """Nome do PDF na pasta escolhida. Retorna None se o usuario cancelar."""
@@ -571,6 +567,7 @@ class AbaScanner(tk.Frame):
         historico.registrar(historico.SCANNER, tipo or "", pasta, f"{n_pag} página(s)", nome_exib)
         self._limpar_sessao()
         self._set_status("Salvo: " + nome_exib, T("OK"))
+        self.notificar("PDF salvo", f"{nome_exib}  ·  {n_pag} página(s)", "ok")
         if aba:
             aba.registrar_scan(pdf_path)
             self.atualizar_info_destino()

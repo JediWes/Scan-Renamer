@@ -4,7 +4,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from .. import historico
-from ..tema import T, FONT_SM, FONT_XS
+from ..tema import T, FONT_XS
+from . import anim
+from .widgets import Botao
 
 ROTULO_ACAO = {
     historico.RENOMEAR: "Renomeado",
@@ -28,6 +30,7 @@ class JanelaHistorico(tk.Toplevel):
         self._build()
         self._carregar()
         self.bind("<Escape>", lambda e: self.destroy())
+        anim.surgir(self)
 
     def _build(self):
         topo = tk.Frame(self, bg=T("BG"), padx=20, pady=14)
@@ -58,17 +61,11 @@ class JanelaHistorico(tk.Toplevel):
 
         rod = tk.Frame(self, bg=T("BG"), padx=20, pady=14)
         rod.pack(fill="x")
-        estilo = dict(font=FONT_SM, relief="flat", cursor="hand2", padx=14, pady=7, bd=0)
-        tk.Button(rod, text="Fechar", bg=T("BTN_SEC_BG"), fg=T("BTN_SEC_FG"),
-                  activebackground=T("BORDER"), activeforeground=T("TEXT"),
-                  command=self.destroy, **estilo).pack(side="right")
-        tk.Button(rod, text="Abrir planilha (CSV)", bg=T("BTN_SEC_BG"), fg=T("BTN_SEC_FG"),
-                  activebackground=T("BORDER"), activeforeground=T("TEXT"),
-                  command=self._abrir_csv, **estilo).pack(side="right", padx=(0, 6))
-        tk.Button(rod, text="Desfazer última renomeação", bg=T("ACCENT"),
-                  fg=T("TEXT_ON_ACCENT"), activebackground=T("ACCENT2"),
-                  activeforeground=T("TEXT_ON_ACCENT"),
-                  command=self._desfazer_ultima, **estilo).pack(side="left")
+        Botao(rod, "Fechar", self.destroy, variante="secundario").pack(side="right")
+        Botao(rod, "Abrir planilha (CSV)", self._abrir_csv, variante="secundario",
+              dica="Abre o histórico completo no Excel").pack(side="right", padx=(0, 6))
+        Botao(rod, "Desfazer última renomeação", self._desfazer_ultima,
+              dica="Volta a última renomeação ao nome original  (Ctrl+Z)").pack(side="left")
 
     def _carregar(self):
         self.tv.delete(*self.tv.get_children())

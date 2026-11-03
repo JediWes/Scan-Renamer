@@ -2,10 +2,13 @@
 import os
 import threading
 import tkinter as tk
+from tkinter import ttk
 from tkinter import messagebox
 
 from ..arquivos import pdf_para_imagem
-from ..tema import T, FONT_B, FONT_XS
+from ..tema import T, FONT_B
+from . import anim
+from .widgets import Botao
 
 
 class JanelaVisualizacao(tk.Toplevel):
@@ -19,6 +22,16 @@ class JanelaVisualizacao(tk.Toplevel):
         self._pil_img = None
         self._img_ref = None
         self._build()
+        # Atalhos: +/- e Ctrl+roda do mouse para zoom, 0 para ajustar, Esc fecha
+        self.bind("<plus>", lambda e: self._zoom_in())
+        self.bind("<KP_Add>", lambda e: self._zoom_in())
+        self.bind("<minus>", lambda e: self._zoom_out())
+        self.bind("<KP_Subtract>", lambda e: self._zoom_out())
+        self.bind("<Key-0>", lambda e: self._zoom_fit())
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Control-MouseWheel>",
+                  lambda e: self._zoom_in() if e.delta > 0 else self._zoom_out())
+        anim.surgir(self)
 
     def _build(self):
         tb = tk.Frame(self, bg=T("SIDEBAR"), pady=8)
@@ -30,18 +43,12 @@ class JanelaVisualizacao(tk.Toplevel):
                           ("Zoom −", self._zoom_out),
                           ("Ajustar", self._zoom_fit),
                           ("1:1  Original", self._zoom_real)]:
-            tk.Button(tb, text=txt, font=FONT_XS,
-                      bg=T("ACCENT2"), fg=T("HDR_FG"),
-                      relief="flat", cursor="hand2", padx=10, pady=4, bd=0,
-                      activebackground=T("ACCENT"), activeforeground="white",
-                      command=cmd).pack(side="right", padx=(0, 6))
+            Botao(tb, txt, cmd, variante="secundario", tamanho="sm").pack(side="right", padx=(0, 6))
         frame = tk.Frame(self, bg=T("BG"))
         frame.pack(fill="both", expand=True)
         self._cv = tk.Canvas(frame, bg=T("CARD"), highlightthickness=0)
-        hbar = tk.Scrollbar(frame, orient="horizontal", command=self._cv.xview,
-                            bg=T("CARD"), troughcolor=T("BG"), relief="flat", bd=0)
-        vbar = tk.Scrollbar(frame, orient="vertical", command=self._cv.yview,
-                            bg=T("CARD"), troughcolor=T("BG"), relief="flat", bd=0)
+        hbar = ttk.Scrollbar(frame, orient="horizontal", command=self._cv.xview)
+        vbar = ttk.Scrollbar(frame, orient="vertical", command=self._cv.yview)
         self._cv.configure(xscrollcommand=hbar.set, yscrollcommand=vbar.set)
         vbar.pack(side="right", fill="y")
         hbar.pack(side="bottom", fill="x")

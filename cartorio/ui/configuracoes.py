@@ -4,6 +4,8 @@ from tkinter import messagebox
 
 from ..tema import T, FONT, FONT_B, FONT_SM, FONT_XS
 from ..constantes import EXTENSOES_PADRAO
+from . import anim
+from .widgets import Botao
 
 
 class TelaConfiguracoes(tk.Toplevel):
@@ -21,12 +23,8 @@ class TelaConfiguracoes(tk.Toplevel):
         self._build()
 
     def _build(self):
-        hdr = tk.Frame(self, bg=T("ACCENT"), pady=12)
-        hdr.pack(fill="x")
-        tk.Label(hdr, text="Configurações",
-                 font=("Segoe UI", 11, "bold"),
-                 bg=T("ACCENT"), fg=T("TEXT_ON_ACCENT")).pack()
-        tk.Frame(self, bg=T("BORDER"), height=1).pack(fill="x")
+        tk.Label(self, text="Configurações", font=("Segoe UI", 12, "bold"),
+                 bg=T("BG"), fg=T("TEXT"), anchor="w").pack(fill="x", padx=26, pady=(18, 0))
 
         body = tk.Frame(self, bg=T("BG"), padx=26, pady=18)
         body.pack(fill="both", expand=True)
@@ -98,16 +96,10 @@ class TelaConfiguracoes(tk.Toplevel):
 
         bf = tk.Frame(self, bg=T("BG"), padx=26, pady=12)
         bf.pack(fill="x")
-        tk.Button(bf, text="Cancelar", font=FONT,
-                  bg=T("BTN_SEC_BG"), fg=T("BTN_SEC_FG"),
-                  relief="flat", cursor="hand2", padx=16, pady=8, bd=0,
-                  activebackground=T("BORDER"), activeforeground=T("TEXT"),
-                  command=self.destroy).pack(side="right", padx=(8, 0))
-        tk.Button(bf, text="  Salvar  ", font=FONT_B,
-                  bg=T("SUCCESS"), fg=T("TEXT_ON_ACCENT"),
-                  relief="flat", cursor="hand2", padx=16, pady=8, bd=0,
-                  activebackground=T("ACCENT2"), activeforeground=T("TEXT_ON_ACCENT"),
-                  command=self._salvar).pack(side="right")
+        Botao(bf, "Cancelar", self.destroy, variante="secundario").pack(side="right", padx=(8, 0))
+        Botao(bf, "Salvar", self._salvar, largura=96).pack(side="right")
+        self.bind("<Escape>", lambda e: self.destroy())
+        anim.surgir(self)
 
     def _sec(self, p, t):
         tk.Label(p, text=t, font=("Segoe UI", 8, "bold"),

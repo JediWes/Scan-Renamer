@@ -10,12 +10,14 @@ from ..config import carregar_preferencias, salvar_preferencias
 from ..constantes import VERSAO, TIPOS, EXTENSOES_PADRAO
 from ..renomeador import ignorar_temporariamente
 from ..scanner import aquecer_powershell, encerrar_powershell
-from ..tema import T, FONT_SM, FONT_XS, aplicar_estilo_ttk, carregar_logo
+from ..tema import T, FONT_XS, aplicar_estilo_ttk, carregar_logo
+from . import anim
 from .aba_declaracao import AbaDeclaracao
 from .aba_scanner import AbaScanner
 from .configuracoes import TelaConfiguracoes
 from .historico import JanelaHistorico
 from .splash import SplashScreen
+from .widgets import AbasDeslizantes, Botao, Notificador, Segmentado
 
 
 class App(tk.Tk):
@@ -59,7 +61,11 @@ class App(tk.Tk):
         tema.definir_tema("claro" if tema.tema_atual() == "escuro" else "escuro")
         self._prefs["tema"] = tema.tema_atual()
         salvar_preferencias(self._prefs)
-        self._aplicar_tema_live()
+
+        def _reconstruir():
+            self._aplicar_tema_live()
+            anim.surgir(self, 220)
+        anim.sumir(self, _reconstruir, 140)
 
     # Scanner 
 
@@ -113,6 +119,7 @@ class App(tk.Tk):
             self._log_global("Não foi possível desfazer: " + msg, "err")
             return False
         self._log_global("Desfeito: " + msg, "warn")
+        self.notificar("Renomeação desfeita", msg, "aviso")
         aba = self.abas.get(entrada["tipo"])
         m = re.fullmatch(r"image(\d{6})\.\w+", entrada["para"], re.IGNORECASE)
         if aba and m:
@@ -162,6 +169,7 @@ class App(tk.Tk):
                 "pasta":      aba.pasta_var.get(),
                 "num":        aba.num_var.get(),
                 "observer":   aba.observer if aba.monitorando else None,
+                "handler":    aba.handler if aba.monitorando else None,
                 "monitorando":aba.monitorando,
                 "proximo":    aba.proximo_numero,
                 "total":      aba.total_renomeados,
@@ -210,16 +218,19 @@ class App(tk.Tk):
             aba._ultimo_caminho  = est["ultimo"]
             if est["observer"]:
                 aba.observer    = est["observer"]
+                aba.handler     = est["handler"]
+                aba.handler.aba = aba   # o monitor passa a atualizar a aba nova
                 aba.monitorando = True
-                aba.btn_var.set("Parar  [F5]")
-                aba.btn.configure(bg=T("DANGER"), activebackground=T("DANGER_HOVER"))
-                aba._dot.configure(bg=T("OK"))
-                aba.lbl_status.configure(
-                    text=f"Monitorando  ·  {os.path.basename(est['pasta'])}", fg=T("OK"))
+                aba._visual_monitorando(True)
             if est["pasta"] and os.path.isdir(est["pasta"]):
                 aba._atualizar_contador_pasta()
     def _abrir(self, splash):
-        splash.fechar(); self.deiconify(); self.lift()
+        def _mostrar():
+            splash.fechar()
+            self.deiconify()
+            self.lift()
+            anim.surgir(self, 260)
+        anim.sumir(splash, _mostrar, 180)
         if self._prefs.get("auto_iniciar", False):
             self.after(600, self._auto_iniciar_todos)
 
@@ -271,140 +282,119 @@ class App(tk.Tk):
     # UI
     def _build_ui(self):
         aplicar_estilo_ttk(self)
+        self.notificar = Notificador(self).mostrar
+
         # Cabecalho
         hdr = tk.Frame(self, bg=T("SIDEBAR"))
         hdr.pack(fill="x")
         hi = tk.Frame(hdr, bg=T("SIDEBAR"), padx=24, pady=12)
         hi.pack(fill="x")
         try:
-            self._logo_hdr = carregar_logo(56)
+            self._logo_hdr = carregar_logo(52)
             tk.Label(hi, image=self._logo_hdr, bg=T("SIDEBAR")).pack(side="left")
         except Exception:
             tk.Label(hi, text="Cartório Santa Cruz", font=("Segoe UI", 13, "bold"),
                      bg=T("SIDEBAR"), fg=T("TEXT")).pack(side="left")
-        tk.Label(hi, text=f"Renomeador de Declarações  ·  v{VERSAO}",
-                 font=FONT_SM, bg=T("SIDEBAR"), fg=T("MUTED")).pack(side="left", padx=(16, 0), pady=(14, 0))
+        tit = tk.Frame(hi, bg=T("SIDEBAR"))
+        tit.pack(side="left", padx=(18, 0))
+        tk.Label(tit, text="Renomeador de Declarações", font=("Segoe UI", 11, "bold"),
+                 bg=T("SIDEBAR"), fg=T("TEXT"), anchor="w").pack(anchor="w")
+        tk.Label(tit, text=f"Versão {VERSAO}", font=FONT_XS,
+                 bg=T("SIDEBAR"), fg=T("MUTED"), anchor="w").pack(anchor="w")
         bf = tk.Frame(hi, bg=T("SIDEBAR"))
         bf.pack(side="right")
         tema_ico = "Modo claro" if tema.tema_atual() == "escuro" else "Modo escuro"
-        for txt, cmd in [(tema_ico, self._toggle_tema),
-                         ("Histórico", self._abrir_historico),
-                         ("Configurações", self._abrir_configs),
-                         ("Atalhos", self._mostrar_atalhos)]:
-            tk.Button(bf, text=txt, font=FONT_SM,
-                      bg=T("SIDEBAR"), fg=T("HDR_FG"),
-                      relief="flat", cursor="hand2", padx=10, pady=5, bd=0,
-                      activebackground=T("ACCENT2"), activeforeground=T("TEXT"),
-                      command=cmd).pack(side="left", padx=(0, 2))
+        for txt, cmd, dica in [(tema_ico, self._toggle_tema, "Alternar tema"),
+                               ("Histórico", self._abrir_historico, "Renomeações e digitalizações  (Ctrl+H)"),
+                               ("Configurações", self._abrir_configs, "Extensões, tempo de espera e início automático  (Ctrl+,)"),
+                               ("Atalhos", self._mostrar_atalhos, "Atalhos de teclado  (F1)")]:
+            Botao(bf, txt, cmd, variante="fantasma", dica=dica).pack(side="left", padx=(0, 2))
         tk.Frame(self, bg=T("BORDER"), height=1).pack(fill="x")
+
+        # Rodape (antes do corpo para ficar sempre visivel)
+        tk.Frame(self, bg=T("BORDER"), height=1).pack(fill="x", side="bottom")
+        ft = tk.Frame(self, bg=T("SIDEBAR"), pady=6)
+        ft.pack(fill="x", side="bottom")
+        tk.Label(ft, text="Cartório Santa Cruz · 2º Subdistrito    Wesley Lucas Assunção",
+                 font=FONT_XS, bg=T("SIDEBAR"), fg=T("MUTED")).pack()
 
         body = tk.Frame(self, bg=T("BG"))
         body.pack(fill="both", expand=True)
 
-        # Abas principais: Renomeador / Scanner
-        main_tab_bar = tk.Frame(body, bg=T("SIDEBAR"))
-        main_tab_bar.pack(fill="x")
-        tk.Frame(body, bg=T("BORDER"), height=1).pack(fill="x")
+        # Abas principais com indicador deslizante e conteudo que entra deslizando
+        self._main_tab_var = tk.StringVar(value="Renomeador")
+        self._main_frames  = {}
+        nomes_main = ["Renomeador", "Scanner"]
         main_content = tk.Frame(body, bg=T("BG"))
-        main_content.pack(fill="both", expand=True)
 
-        self._main_tab_var  = tk.StringVar(value="Renomeador")
-        self._main_tab_btns = {}
-        self._main_ind      = {}
-        self._main_frames   = {}
-
-        def _sel_main(nome):
+        def _ao_trocar(nome, anterior):
             self._main_tab_var.set(nome)
+            novo = self._main_frames[nome]
+            for n, f in self._main_frames.items():
+                if n != nome:
+                    f.place_forget()
+            if anterior is None or anterior == nome:
+                novo.place(x=0, y=0, relwidth=1, relheight=1)
+            else:
+                dx = 36 if nomes_main.index(nome) > nomes_main.index(anterior) else -36
+                anim.animar(novo, "entrada", 240,
+                            lambda p: novo.place(x=int(dx * (1 - p)), y=0, relwidth=1, relheight=1))
+            novo.lift()
             if nome == "Scanner" and hasattr(self, "_aba_scanner"):
                 self._aba_scanner.atualizar_info_destino()
-            for n, f in self._main_frames.items():
-                if n == nome: f.pack(fill="both", expand=True)
-                else:         f.pack_forget()
-            for n, b in self._main_tab_btns.items():
-                ativo = n == nome
-                b.configure(bg=T("SIDEBAR"),
-                            fg=T("TEXT") if ativo else T("MUTED"),
-                            font=("Segoe UI", 10, "bold") if ativo else ("Segoe UI", 10))
-                self._main_ind[n].configure(bg=T("ACCENT") if ativo else T("SIDEBAR"))
-        self._sel_main = _sel_main
 
-        for nome in ["Renomeador", "Scanner"]:
-            col = tk.Frame(main_tab_bar, bg=T("SIDEBAR"))
-            col.pack(side="left", padx=(20 if nome == "Renomeador" else 0, 0))
-            b = tk.Button(col, text=nome, font=("Segoe UI", 10),
-                          bg=T("SIDEBAR"), fg=T("MUTED"),
-                          relief="flat", bd=0, padx=14, pady=9, cursor="hand2",
-                          activebackground=T("SIDEBAR"), activeforeground=T("TEXT"),
-                          command=lambda n=nome: _sel_main(n))
-            b.pack()
-            ind = tk.Frame(col, bg=T("SIDEBAR"), height=2)
-            ind.pack(fill="x")
-            self._main_tab_btns[nome] = b
-            self._main_ind[nome]     = ind
-            f = tk.Frame(main_content, bg=T("BG"))
-            self._main_frames[nome] = f
+        self._abas_main = AbasDeslizantes(body, nomes_main, _ao_trocar)
+        self._abas_main.pack(fill="x")
+        tk.Frame(body, bg=T("BORDER"), height=1).pack(fill="x")
+        main_content.pack(fill="both", expand=True)
+        for nome in nomes_main:
+            self._main_frames[nome] = tk.Frame(main_content, bg=T("BG"))
+        self._sel_main = lambda nome: self._abas_main.selecionar(nome)
 
         # Aba Renomeador
         ren_frame = self._main_frames["Renomeador"]
-        ren_body  = tk.Frame(ren_frame, bg=T("BG"), padx=20, pady=12)
+        ren_body  = tk.Frame(ren_frame, bg=T("BG"), padx=20, pady=14)
         ren_body.pack(fill="both", expand=True)
 
-        # Sub-abas: Nascimento / Obito / Natimorto
-        sub_outer  = tk.Frame(ren_body, bg=T("BG"))
+        sub_outer = tk.Frame(ren_body, bg=T("BG"))
         sub_outer.pack(fill="x")
-        sub_bar    = tk.Frame(sub_outer, bg=T("BG"))
+        sub_bar = tk.Frame(sub_outer, bg=T("BG"))
         sub_bar.pack(fill="x", pady=(0, 10))
-        seg = tk.Frame(sub_bar, bg=T("CARD"), padx=3, pady=3)
-        seg.pack(side="left")
         sub_content = tk.Frame(sub_outer, bg=T("PANEL"),
                                highlightbackground=T("BORDER"), highlightthickness=1)
         sub_content.pack(fill="x")
 
-        self.abas      = {}
-        self._tab_btns = {}
+        self.abas = {}
         self._tab_ativa_var = tk.StringVar(value=TIPOS[0])
 
-        def _selecionar_aba(tipo_sel):
+        def _ao_tipo(tipo_sel):
             self._tab_ativa_var.set(tipo_sel)
             for tipo, aba in self.abas.items():
                 if tipo == tipo_sel: aba.pack(fill="both", expand=True)
                 else:                aba.pack_forget()
-            for tipo, btn in self._tab_btns.items():
-                if tipo == tipo_sel:
-                    btn.configure(bg=T("ACCENT"), fg=T("TEXT_ON_ACCENT"),
-                                  font=("Segoe UI", 10, "bold"))
-                else:
-                    btn.configure(bg=T("CARD"), fg=T("SUBTEXT"),
-                                  font=("Segoe UI", 10))
+            if tipo_sel in self.abas:
+                self.abas[tipo_sel].ao_exibir()
 
+        self._seg_tipos = Segmentado(sub_bar, TIPOS, _ao_tipo)
+        self._seg_tipos.pack(side="left")
+        tk.Label(sub_bar, text="Cada tipo tem sua pasta e sua numeração.",
+                 font=FONT_XS, bg=T("BG"), fg=T("MUTED")).pack(side="left", padx=14)
         for tipo in TIPOS:
-            btn = tk.Button(seg, text=tipo, font=("Segoe UI", 10),
-                            bg=T("CARD"), fg=T("SUBTEXT"),
-                            relief="flat", bd=0, padx=18, pady=6, cursor="hand2",
-                            activebackground=T("ACCENT2"), activeforeground=T("TEXT"),
-                            command=lambda t=tipo: _selecionar_aba(t))
-            btn.pack(side="left")
-            self._tab_btns[tipo] = btn
-            aba = AbaDeclaracao(sub_content, tipo, self._log_global, self.get_prefs)
-            self.abas[tipo] = aba
-        self._selecionar_aba = _selecionar_aba
-        _selecionar_aba(TIPOS[0])
+            self.abas[tipo] = AbaDeclaracao(sub_content, tipo, self._log_global, self.get_prefs,
+                                            notificar=lambda *a, **k: self.notificar(*a, **k))
+        self._selecionar_aba = lambda tipo: self._seg_tipos.selecionar(tipo)
+        self._seg_tipos.selecionar(TIPOS[0], animar=False)
 
         # Log
         lh = tk.Frame(ren_body, bg=T("BG"))
-        lh.pack(fill="x", pady=(12, 4))
-        tk.Label(lh, text="LOG DE ATIVIDADE  [Ctrl+L]",
-                 font=("Segoe UI", 8, "bold"), bg=T("BG"), fg=T("MUTED")).pack(side="left")
-        tk.Button(lh, text="Limpar", font=FONT_XS,
-                  bg=T("BTN_SEC_BG"), fg=T("BTN_SEC_FG"),
-                  relief="flat", cursor="hand2", padx=8, pady=2, bd=0,
-                  activebackground=T("ACCENT"), activeforeground="white",
-                  command=self._limpar_log).pack(side="right")
-        tk.Button(lh, text="Desfazer última  [Ctrl+Z]", font=FONT_XS,
-                  bg=T("BTN_SEC_BG"), fg=T("BTN_SEC_FG"),
-                  relief="flat", cursor="hand2", padx=8, pady=2, bd=0,
-                  activebackground=T("ACCENT"), activeforeground="white",
-                  command=self._desfazer_ultima).pack(side="right", padx=(0, 6))
+        lh.pack(fill="x", pady=(14, 6))
+        tk.Label(lh, text="ATIVIDADE", font=("Segoe UI", 8, "bold"),
+                 bg=T("BG"), fg=T("MUTED")).pack(side="left")
+        Botao(lh, "Limpar", self._limpar_log, variante="secundario", tamanho="sm",
+              dica="Limpar a lista  (Ctrl+L)").pack(side="right")
+        Botao(lh, "Desfazer última", self._desfazer_ultima, variante="secundario", tamanho="sm",
+              dica="Volta a última renomeação ao nome original  (Ctrl+Z)"
+              ).pack(side="right", padx=(0, 6))
         lw = tk.Frame(ren_body, bg=T("LOG_BG"),
                       highlightbackground=T("BORDER"), highlightthickness=1)
         lw.pack(fill="both", expand=True)
@@ -413,7 +403,7 @@ class App(tk.Tk):
                                 relief="flat", bd=0, state="disabled",
                                 wrap="word", padx=12, pady=10, highlightthickness=0,
                                 selectbackground=T("ACCENT"),
-                                insertbackground=T("TEXT"))
+                                insertbackground=T("TEXT"), spacing1=2, spacing3=2)
         self.log_text.pack(side="left", fill="both", expand=True)
         sb = ttk.Scrollbar(lw, orient="vertical", command=self.log_text.yview)
         sb.pack(side="right", fill="y")
@@ -422,35 +412,63 @@ class App(tk.Tk):
         self.log_text.tag_config("warn", foreground=T("WARN"))
         self.log_text.tag_config("err",  foreground=T("ERR"))
         self.log_text.tag_config("info", foreground=T("MUTED"))
+        self.log_text.tag_config("hora", foreground=T("MUTED"))
+        self.log_text.tag_config("vazio", foreground=T("MUTED"), justify="center",
+                                 spacing1=40)
+        self.log_text.tag_config("novo", background=T("NOTIF_BG"))
+        self._log_vazio = False
+        self._mostrar_log_vazio()
 
-        # Aba Scanner 
+        # Aba Scanner
         scanner_frame = self._main_frames["Scanner"]
         self._aba_scanner = AbaScanner(scanner_frame, self._log_global,
-                                       obter_aba=self.abas.get)
+                                       obter_aba=self.abas.get,
+                                       notificar=lambda *a, **k: self.notificar(*a, **k))
         self._aba_scanner.pack(fill="both", expand=True)
 
-        # Seleciona Renomeador por padrão
-        _sel_main("Renomeador")
+        self.update_idletasks()
+        self._abas_main.selecionar("Renomeador", animar=False)
 
-        # Rodape
-        tk.Frame(self, bg=T("BORDER"), height=1).pack(fill="x", side="bottom")
-        ft = tk.Frame(self, bg=T("SIDEBAR"), pady=6)
-        ft.pack(fill="x", side="bottom")
-        tk.Label(ft, text="Cartório Santa Cruz · 2º Subdistrito    Wesley Lucas Assunção",
-                 font=FONT_XS, bg=T("SIDEBAR"), fg=T("MUTED")).pack()
-
-    def _limpar_log(self):
+    def _mostrar_log_vazio(self):
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
+        self.log_text.insert("end", "As renomeações e digitalizações aparecem aqui.", "vazio")
         self.log_text.configure(state="disabled")
+        self._log_vazio = True
+
+    def _limpar_log(self):
+        self._mostrar_log_vazio()
 
     def _log_global(self, msg, tag="info"):
         ts = time.strftime("%H:%M:%S")
+
         def _w():
-            self.log_text.configure(state="normal")
-            self.log_text.insert("end", f"[{ts}]  {msg}\n", tag)
+            try:
+                self.log_text.configure(state="normal")
+            except tk.TclError:
+                return
+            if self._log_vazio:
+                self.log_text.delete("1.0", "end")
+                self._log_vazio = False
+            inicio = self.log_text.index("end-1c")
+            self.log_text.insert("end", f"{ts}   ", "hora")
+            self.log_text.insert("end", f"{msg}\n", tag)
             self.log_text.see("end")
             self.log_text.configure(state="disabled")
+            # Realce que desaparece na linha recem-chegada
+            tag_linha = f"linha{id(msg)}{ts}"
+            self.log_text.tag_add(tag_linha, inicio, "end-1c")
+            base = T("LOG_BG")
+
+            def quadro(p):
+                try:
+                    self.log_text.tag_config(tag_linha,
+                                             background=anim.misturar(T("NOTIF_BG"), base, p))
+                except tk.TclError:
+                    pass
+            anim.animar(self.log_text, tag_linha, 1200, quadro,
+                        ao_fim=lambda: self.log_text.tag_delete(tag_linha),
+                        easing=anim.ease_in_out_cubic)
         self.after(0, _w)
 
     def destroy(self): super().destroy()

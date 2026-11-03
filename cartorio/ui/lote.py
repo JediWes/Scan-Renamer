@@ -7,9 +7,11 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
 
-from ..tema import T, FONT, FONT_B, FONT_SM, FONT_XS
+from ..tema import T, FONT_B, FONT_SM, FONT_XS
 from .. import historico
 from ..arquivos import listar_para_lote
+from . import anim
+from .widgets import Botao
 
 
 class JanelaLote(tk.Toplevel):
@@ -31,11 +33,8 @@ class JanelaLote(tk.Toplevel):
         self._escanear()
 
     def _build(self):
-        hdr = tk.Frame(self, bg=T("ACCENT"), pady=10)
-        hdr.pack(fill="x")
-        tk.Label(hdr, text="Renomear em lote", font=("Segoe UI", 11, "bold"),
-                 bg=T("ACCENT"), fg=T("TEXT_ON_ACCENT")).pack()
-        tk.Frame(self, bg=T("BORDER"), height=1).pack(fill="x")
+        tk.Label(self, text=f"Renomear em lote  ·  {self.tipo}", font=("Segoe UI", 12, "bold"),
+                 bg=T("BG"), fg=T("TEXT"), anchor="w").pack(fill="x", padx=20, pady=(16, 0))
 
         body = tk.Frame(self, bg=T("BG"), padx=20, pady=14)
         body.pack(fill="both", expand=True)
@@ -97,17 +96,11 @@ class JanelaLote(tk.Toplevel):
 
         bf = tk.Frame(body, bg=T("BG"))
         bf.pack(fill="x", pady=(8, 0))
-        tk.Button(bf, text="Cancelar", font=FONT,
-                  bg=T("BTN_SEC_BG"), fg=T("BTN_SEC_FG"),
-                  relief="flat", cursor="hand2", padx=16, pady=8, bd=0,
-                  command=self.destroy).pack(side="right", padx=(8, 0))
-        self.btn_exec = tk.Button(bf, text="Renomear todos", font=FONT_B,
-                                   bg=T("SUCCESS"), fg=T("TEXT_ON_ACCENT"),
-                                   relief="flat", cursor="hand2", padx=16, pady=8, bd=0,
-                                   activebackground=T("ACCENT2"),
-                                   activeforeground=T("TEXT_ON_ACCENT"),
-                                   command=self._executar)
+        Botao(bf, "Fechar", self.destroy, variante="secundario").pack(side="right", padx=(8, 0))
+        self.btn_exec = Botao(bf, "Renomear todos", self._executar, largura=150)
         self.btn_exec.pack(side="right")
+        self.bind("<Escape>", lambda e: self.destroy())
+        anim.surgir(self)
 
     def _escanear(self):
         self._arquivos = listar_para_lote(self.pasta, set(self.extensoes))
@@ -165,7 +158,7 @@ class JanelaLote(tk.Toplevel):
             self.lbl_prog.configure(
                 text=f"Concluído: {renomeados} renomeados, {erros} erros",
                 fg=T("OK") if erros == 0 else T("WARN"))
-            self.btn_exec.configure(state="normal", text="Concluído", bg=T("ACCENT2"))
+            self.btn_exec.configure(state="disabled", text="Concluído")
             self.callback(numero)
         self.after(0, _fim)
 
