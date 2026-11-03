@@ -21,6 +21,10 @@ class InstanciaUnica:
         if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
             # Windows: impede que outro processo ocupe a mesma porta com reuse
             s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            # Linux/macOS: permite reabrir logo apos fechar (porta em TIME_WAIT);
+            # dois sockets escutando na mesma porta continuam impedidos.
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", self.porta))
             s.listen(2)
@@ -35,6 +39,9 @@ class InstanciaUnica:
         try:
             with socket.create_connection(("127.0.0.1", self.porta), timeout=2) as c:
                 c.sendall(MENSAGEM)
+                # Quem fecha primeiro fica com o TIME_WAIT: assim a porta do app
+                # aberto nao fica presa depois que ele for encerrado.
+                c.shutdown(socket.SHUT_WR)
             return True
         except OSError:
             return False
@@ -53,7 +60,11 @@ class InstanciaUnica:
                 with conn:
                     try:
                         conn.settimeout(2)
-                        if conn.recv(32).startswith(MENSAGEM):
+                        recebido = conn.recv(32)
+                        # Espera o cliente encerrar antes de fechar deste lado
+                        while conn.recv(32):
+                            pass
+                        if recebido.startswith(MENSAGEM):
                             ao_receber()
                     except OSError:
                         pass
@@ -61,6 +72,11 @@ class InstanciaUnica:
 
     def liberar(self):
         if self._sock is not None:
+            try:
+                # shutdown acorda o accept() bloqueado na outra thread
+                self._sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
             try:
                 self._sock.close()
             except OSError:

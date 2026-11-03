@@ -46,10 +46,15 @@ cartorio/
   ui/                    janelas e abas (Tkinter)
     anim.py              motor de animação (curvas, cores, transições)
     widgets.py           botão, abas, seletor, avisos, dicas, barra de atividade
-assets/                  logo vetorizada (SVG) e PNG
+assets/                  logo vetorizada (SVG e PNG) e fontes
 ```
 
 Arquivos gerados ao lado do `main.py`: `cartorio_config.json`, `scanner_presets.json`, `historico.csv` e `erros.log`.
+
+## Tipografia e abertura
+
+- Fontes **IBM Plex Sans** e **IBM Plex Mono** em `assets/fonts` (licença SIL OFL 1.1, em `assets/fonts/OFL.txt`). São carregadas apenas pelo app, sem instalar nada no Windows; se faltarem, o app usa Segoe UI e Consolas.
+- A tela de abertura é desenhada pelo próprio app nas cores da marca. Para usar uma foto como fundo, coloque-a em `assets/splash.jpg` (ou `.png`); ela é recortada para preencher a tela e escurecida para manter o texto legível.
 
 ## Logo
 

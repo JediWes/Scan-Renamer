@@ -13,7 +13,7 @@ from ..config import carregar_presets, salvar_presets, PRESET_ULTIMO
 from ..constantes import TIPOS
 from ..scanner import (MODOS_COR_LABEL, pagina_em_branco, scanner_listar_dispositivos,
                        scanner_uma_pagina, tifs_para_pdf)
-from ..tema import T, FONT_SM, FONT_XS
+from ..tema import T, FONT_SM, FONT_XS, F_MONO_B, F_SECAO
 from . import anim
 from .widgets import BarraAtividade, Botao, CampoTexto
 
@@ -61,7 +61,7 @@ class AbaScanner(tk.Frame):
         right.pack_propagate(False)
 
         # Scanner detectado
-        self._sec(left, "SCANNER")
+        self._sec(left, "Scanner")
         dev_row = tk.Frame(left, bg=T("BG"))
         dev_row.pack(fill="x", pady=(4, 12))
         self.dev_var = tk.StringVar(value="Detectando…")
@@ -75,7 +75,7 @@ class AbaScanner(tk.Frame):
         self._sep(left)
 
         # Presets
-        self._sec(left, "PRESET")
+        self._sec(left, "Preset")
         pr = tk.Frame(left, bg=T("BG"))
         pr.pack(fill="x", pady=(4, 12))
         self.preset_var = tk.StringVar(value=PRESET_MANUAL)
@@ -92,7 +92,7 @@ class AbaScanner(tk.Frame):
         self._sep(left)
 
         # Configuracoes
-        self._sec(left, "DIGITALIZAÇÃO")
+        self._sec(left, "Digitalização")
         grid = tk.Frame(left, bg=T("BG"))
         grid.pack(fill="x", pady=(6, 0))
         grid.columnconfigure(1, weight=1)
@@ -130,7 +130,7 @@ class AbaScanner(tk.Frame):
         self._sep(left, topo=14)
 
         # Destino
-        self._sec(left, "SALVAR EM")
+        self._sec(left, "Salvar em")
         self.destino_var = tk.StringVar(value=DESTINO_PASTA)
         ttk.Combobox(left, textvariable=self.destino_var, state="readonly", font=FONT_SM,
                      values=[DESTINO_PASTA] + list(DESTINO_ROTULO.values())
@@ -162,13 +162,14 @@ class AbaScanner(tk.Frame):
         self._dot = tk.Frame(status_frame, bg=T("MUTED"), width=4)
         self._dot.pack(side="left", fill="y")
         self._status_var = tk.StringVar(value="Aguardando…")
-        tk.Label(status_frame, textvariable=self._status_var,
-                 font=FONT_XS, bg=T("CARD"), fg=T("SUBTEXT"),
-                 wraplength=200, justify="left", padx=8, pady=8).pack(side="left")
+        self._lbl_status = tk.Label(status_frame, text=self._status_var.get(),
+                                    font=FONT_XS, bg=T("CARD"), fg=T("SUBTEXT"),
+                                    wraplength=200, justify="left", padx=8, pady=8)
+        self._lbl_status.pack(side="left")
 
         self._pags_var = tk.StringVar(value="")
         self._lbl_pags = tk.Label(right, textvariable=self._pags_var,
-                 font=("Consolas", 9, "bold"),
+                 font=F_MONO_B,
                  bg=T("BG"), fg=T("OK"))
         self._lbl_pags.pack(padx=10, anchor="w")
 
@@ -194,7 +195,7 @@ class AbaScanner(tk.Frame):
         return c
 
     def _sec(self, p, t):
-        tk.Label(p, text=t, font=("Segoe UI", 8, "bold"),
+        tk.Label(p, text=t, font=F_SECAO,
                  bg=T("BG"), fg=T("MUTED"), anchor="w").pack(fill="x", pady=(0, 2))
 
     def _sep(self, p, topo=0):
@@ -377,6 +378,7 @@ class AbaScanner(tk.Frame):
 
     def _set_status(self, txt, cor=None):
         self._status_var.set(txt)
+        anim.trocar_texto(self._lbl_status, txt, T("SUBTEXT"), 240)
         if cor:
             anim.animar_cor(self._dot, "bg", cor, 250, chave="status")
 
@@ -473,9 +475,13 @@ class AbaScanner(tk.Frame):
     def _pos_scan(self, novos, removidas, multipag):
         self._ocupado = False
         self._atividade.parar()
+        antes = len(self._tifs_sessao)
         self._tifs_sessao.extend(novos)
         n = len(self._tifs_sessao)
-        self._pags_var.set(f"{n} página(s) acumulada(s)" if n else "")
+        if n:
+            anim.contar(self, self._pags_var, antes, n, lambda k: f"{k} página(s) acumulada(s)", 450)
+        else:
+            self._pags_var.set("")
         if n:
             anim.realcar(self._lbl_pags, "fg", T("TEXT"), T("OK"), 700)
         self._btn_scan.configure(state="normal")

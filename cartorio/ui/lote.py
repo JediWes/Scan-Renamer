@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter import messagebox
 
-from ..tema import T, FONT_B, FONT_SM, FONT_XS
+from ..tema import T, FONT_B, FONT_SM, FONT_XS, F_MONO, F_MONO_LG, F_SECAO, F_TITULO
 from .. import historico
 from ..arquivos import listar_para_lote
 from . import anim
@@ -33,7 +33,7 @@ class JanelaLote(tk.Toplevel):
         self._escanear()
 
     def _build(self):
-        tk.Label(self, text=f"Renomear em lote  ·  {self.tipo}", font=("Segoe UI", 12, "bold"),
+        tk.Label(self, text=f"Renomear em lote  ·  {self.tipo}", font=F_TITULO,
                  bg=T("BG"), fg=T("TEXT"), anchor="w").pack(fill="x", padx=20, pady=(16, 0))
 
         body = tk.Frame(self, bg=T("BG"), padx=20, pady=14)
@@ -53,18 +53,18 @@ class JanelaLote(tk.Toplevel):
                  bg=T("BG"), fg=T("TEXT")).pack(side="left", padx=(0, 10))
         self.num_var = tk.StringVar(value=f"image{self.num_inicio:06d}")
         tk.Entry(num_row, textvariable=self.num_var,
-                 font=("Consolas", 12, "bold"),
+                 font=F_MONO_LG,
                  bg=T("ENTRY_BG"), fg=T("OK"), insertbackground=T("OK"),
                  relief="flat", bd=0, width=14,
                  highlightbackground=T("BORDER"), highlightthickness=1
                  ).pack(side="left", ipady=6)
 
-        tk.Label(body, text="Arquivos a renomear:", font=("Segoe UI", 8, "bold"),
+        tk.Label(body, text="Arquivos a renomear:", font=F_SECAO,
                  bg=T("BG"), fg=T("MUTED"), anchor="w").pack(fill="x", pady=(0, 4))
         lf = tk.Frame(body, bg=T("LOG_BG"),
                        highlightbackground=T("BORDER"), highlightthickness=1)
         lf.pack(fill="both", expand=True, pady=(0, 12))
-        self.listbox = tk.Listbox(lf, font=("Consolas", 9),
+        self.listbox = tk.Listbox(lf, font=F_MONO,
                                    bg=T("LOG_BG"), fg=T("LOG_FG"),
                                    selectbackground=T("ACCENT"),
                                    relief="flat", bd=0, activestyle="none")

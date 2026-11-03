@@ -2,7 +2,7 @@
 import tkinter as tk
 from tkinter import messagebox
 
-from ..tema import T, FONT, FONT_B, FONT_SM, FONT_XS
+from ..tema import T, FONT, FONT_B, FONT_SM, FONT_XS, F_MONO_B, F_SECAO, F_TITULO
 from ..constantes import EXTENSOES_PADRAO
 from . import anim
 from .widgets import Botao
@@ -23,14 +23,14 @@ class TelaConfiguracoes(tk.Toplevel):
         self._build()
 
     def _build(self):
-        tk.Label(self, text="Configurações", font=("Segoe UI", 12, "bold"),
+        tk.Label(self, text="Configurações", font=F_TITULO,
                  bg=T("BG"), fg=T("TEXT"), anchor="w").pack(fill="x", padx=26, pady=(18, 0))
 
         body = tk.Frame(self, bg=T("BG"), padx=26, pady=18)
         body.pack(fill="both", expand=True)
 
         # Delay
-        self._sec(body, "DELAY ANTES DE RENOMEAR")
+        self._sec(body, "Espera antes de renomear")
         self.delay_var = tk.DoubleVar(value=self.prefs.get("delay", 0.3))
         dr = tk.Frame(body, bg=T("BG"))
         dr.pack(fill="x", pady=(4, 16))
@@ -40,14 +40,14 @@ class TelaConfiguracoes(tk.Toplevel):
                  activebackground=T("ACCENT"), length=300,
                  font=FONT_XS).pack(side="left")
         tk.Label(dr, textvariable=self.delay_var,
-                 font=("Consolas", 10, "bold"),
+                 font=F_MONO_B,
                  bg=T("BG"), fg=T("SUBTEXT"), width=4).pack(side="left", padx=6)
         tk.Label(dr, text="s", font=FONT_SM,
                  bg=T("BG"), fg=T("MUTED")).pack(side="left")
 
         # Extensões
         tk.Frame(body, bg=T("SEP"), height=1).pack(fill="x", pady=(0, 14))
-        self._sec(body, "EXTENSÕES MONITORADAS")
+        self._sec(body, "Extensões monitoradas")
         ativas = set(self.prefs.get("extensoes", self.TODAS_EXTS))
         self.ext_vars = {}
         ef = tk.Frame(body, bg=T("BG"))
@@ -64,7 +64,7 @@ class TelaConfiguracoes(tk.Toplevel):
 
         # Tema
         tk.Frame(body, bg=T("SEP"), height=1).pack(fill="x", pady=(0, 14))
-        self._sec(body, "TEMA DA INTERFACE")
+        self._sec(body, "Tema da interface")
         self.tema_var = tk.StringVar(value=self.prefs.get("tema", "escuro"))
         tr = tk.Frame(body, bg=T("BG"))
         tr.pack(fill="x", pady=(4, 0))
@@ -80,7 +80,7 @@ class TelaConfiguracoes(tk.Toplevel):
         # Botões
         # ── Auto-iniciar ──
         tk.Frame(body, bg=T("SEP"), height=1).pack(fill="x", pady=(14, 14))
-        tk.Label(body, text="COMPORTAMENTO", font=("Segoe UI", 8, "bold"),
+        tk.Label(body, text="Comportamento", font=F_SECAO,
                  bg=T("BG"), fg=T("MUTED"), anchor="w").pack(fill="x", pady=(0, 6))
         self.autostart_var = tk.BooleanVar(value=self.prefs.get("auto_iniciar", False))
         f_auto = tk.Frame(body, bg=T("CARD"), padx=16, pady=10)
@@ -102,7 +102,7 @@ class TelaConfiguracoes(tk.Toplevel):
         anim.surgir(self)
 
     def _sec(self, p, t):
-        tk.Label(p, text=t, font=("Segoe UI", 8, "bold"),
+        tk.Label(p, text=t, font=F_SECAO,
                  bg=T("BG"), fg=T("MUTED"), anchor="w").pack(fill="x", pady=(0, 2))
 
     def _salvar(self):

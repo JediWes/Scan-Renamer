@@ -33,11 +33,20 @@ def misturar(c1, c2, t):
 _ativas = {}
 
 
+def _raiz(widget):
+    # Agenda na janela principal: um widget destruido antes do proximo quadro
+    # faria o Tkinter falhar ao limpar o callback agendado nele.
+    try:
+        return widget._root()
+    except Exception:
+        return widget
+
+
 def parar(widget, chave):
     job = _ativas.pop((str(widget), chave), None)
     if job:
         try:
-            widget.after_cancel(job)
+            _raiz(widget).after_cancel(job)
         except Exception:
             pass
 
@@ -51,6 +60,7 @@ def animar(widget, chave, duracao_ms, quadro, ao_fim=None, easing=ease_out_cubic
     inicio = time.perf_counter()
     dur = max(1, duracao_ms) / 1000.0
     k = (str(widget), chave)
+    raiz = _raiz(widget)
 
     def passo():
         _ativas.pop(k, None)
@@ -65,7 +75,7 @@ def animar(widget, chave, duracao_ms, quadro, ao_fim=None, easing=ease_out_cubic
         except Exception:
             return
         if t < 1.0:
-            _ativas[k] = widget.after(QUADRO_MS, passo)
+            _ativas[k] = raiz.after(QUADRO_MS, passo)
         elif ao_fim:
             ao_fim()
     passo()
@@ -146,3 +156,34 @@ class Respiracao:
                 self.widget.configure(**{self.prop: cor_final})
             except Exception:
                 pass
+
+
+def contar(widget, variavel, de, ate, formatar, duracao_ms=600):
+    """Anima um numero inteiro em uma StringVar, de 'de' ate 'ate'."""
+    if de == ate or de is None:
+        variavel.set(formatar(ate))
+        return
+    animar(widget, ("contador", str(variavel)), duracao_ms,
+           lambda p: variavel.set(formatar(round(de + (ate - de) * p))))
+
+
+def trocar_texto(label, texto, cor=None, duracao_ms=260):
+    """O texto atual esmaece, e o novo surge com a cor final."""
+    try:
+        fundo = label.cget("bg")
+        cor_atual = label.cget("fg")
+    except Exception:
+        return
+    destino = cor or cor_atual
+    if label.cget("text") == texto:
+        animar_cor(label, "fg", destino, duracao_ms)
+        return
+    metade = duracao_ms // 2
+
+    def segunda():
+        label.configure(text=texto)
+        animar(label, "troca", duracao_ms - metade,
+               lambda p: label.configure(fg=misturar(fundo, destino, p)))
+    animar(label, "troca", metade,
+           lambda p: label.configure(fg=misturar(cor_atual, fundo, p)),
+           ao_fim=segunda, easing=ease_in_out_cubic)

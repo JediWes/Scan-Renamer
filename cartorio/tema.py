@@ -1,6 +1,7 @@
 """Paleta de cores, fontes e logo."""
 import base64
 import io
+import os
 
 from .logo_data import LOGO_B64, LOGO_B64_ESCURO
 
@@ -87,10 +88,122 @@ def T(k):
     return TEMAS[_atual][k]
 
 
-FONT    = ("Segoe UI", 10)
-FONT_B  = ("Segoe UI", 10, "bold")
-FONT_SM = ("Segoe UI", 9)
-FONT_XS = ("Segoe UI", 8)
+# Tipografia
+# Fontes nomeadas do Tk: os widgets referenciam o nome e configurar_fontes()
+# define familia e tamanho uma unica vez. Escala: 7, 8, 9, 10, 11, 13, 15, 20.
+FONT    = "AppTexto"        # 10 regular
+FONT_B  = "AppTextoForte"   # 10 semibold
+FONT_SM = "AppPequena"      # 9 regular
+FONT_XS = "AppLegenda"      # 8 regular
+F_PEQ_B     = "AppPequenaForte"  # 9 semibold
+F_SECAO     = "AppSecao"         # 9 semibold, titulos de secao
+F_MINI      = "AppMini"          # 7 semibold, rotulos em maiusculas
+F_BOTAO     = "AppBotao"         # 9 medium
+F_BOTAO_SM  = "AppBotaoPequeno"  # 8 medium
+F_BOTAO_LG  = "AppBotaoGrande"   # 11 semibold
+F_BOTAO_XL  = "AppBotaoDestaque" # 15 semibold
+F_ABA       = "AppAba"           # 10 semibold
+F_SUBTITULO = "AppSubtitulo"     # 11 semibold
+F_TITULO    = "AppTitulo"        # 13 semibold
+F_MONO      = "AppMono"          # 9 mono
+F_MONO_XS   = "AppMonoPequena"   # 8 mono
+F_MONO_B    = "AppMonoForte"     # 9 mono semibold
+F_MONO_LG   = "AppMonoGrande"    # 12 mono semibold
+F_DISPLAY   = "AppDisplay"       # 20 mono semibold, numero em destaque
+F_SPLASH    = "AppSplash"        # 20 semibold
+
+_ESCALA = {
+    FONT: ("texto", 10), FONT_B: ("semi", 10), FONT_SM: ("texto", 9), FONT_XS: ("texto", 8),
+    F_PEQ_B: ("semi", 9), F_SECAO: ("semi", 9), F_MINI: ("semi", 7),
+    F_BOTAO: ("medio", 9), F_BOTAO_SM: ("medio", 8), F_BOTAO_LG: ("semi", 11),
+    F_BOTAO_XL: ("semi", 15), F_ABA: ("semi", 10), F_SUBTITULO: ("semi", 11),
+    F_TITULO: ("semi", 13), F_MONO: ("mono", 9), F_MONO_XS: ("mono", 8),
+    F_MONO_B: ("mono_semi", 9), F_MONO_LG: ("mono_semi", 12), F_DISPLAY: ("mono_semi", 20),
+    F_SPLASH: ("semi", 20),
+}
+
+# Candidatas por papel, em ordem de preferencia. No Windows as variantes
+# Medium/SemiBold aparecem como familias proprias (nomes abreviados no arquivo).
+_CANDIDATAS = {
+    "texto":     ["IBM Plex Sans", "Segoe UI", "DejaVu Sans"],
+    "medio":     ["IBM Plex Sans Medm", "IBM Plex Sans Medium"],
+    "semi":      ["IBM Plex Sans SmBld", "IBM Plex Sans SemiBold"],
+    "mono":      ["IBM Plex Mono", "Consolas", "DejaVu Sans Mono"],
+    "mono_semi": ["IBM Plex Mono SmBld", "IBM Plex Mono SemiBold"],
+}
+
+
+def _pasta_fontes():
+    from .config import BASE_DIR
+    return os.path.join(BASE_DIR, "assets", "fonts")
+
+
+def registrar_fontes_embutidas():
+    """
+    Windows: carrega os .ttf de assets/fonts apenas para este processo
+    (nada e instalado no sistema). Deve rodar antes de criar a janela Tk.
+    """
+    if os.name != "nt":
+        return 0
+    try:
+        import ctypes
+        gdi32 = ctypes.windll.gdi32
+    except Exception:
+        return 0
+    FR_PRIVATE = 0x10
+    total = 0
+    pasta = _pasta_fontes()
+    try:
+        arquivos = [f for f in os.listdir(pasta) if f.lower().endswith((".ttf", ".otf"))]
+    except OSError:
+        return 0
+    for nome in arquivos:
+        try:
+            total += gdi32.AddFontResourceExW(os.path.join(pasta, nome), FR_PRIVATE, 0)
+        except Exception:
+            pass
+    return total
+
+
+def configurar_fontes(root):
+    """Cria (ou atualiza) as fontes nomeadas com a melhor familia disponivel."""
+    import tkinter.font as tkfont
+    disponiveis = set(tkfont.families(root))
+
+    def escolher(papel):
+        for fam in _CANDIDATAS[papel]:
+            if fam in disponiveis:
+                return fam, "normal"
+        return None
+
+    texto = escolher("texto") or ("TkDefaultFont", "normal")
+    mono = escolher("mono") or ("TkFixedFont", "normal")
+    papeis = {
+        "texto": texto,
+        "medio": escolher("medio") or texto,
+        "semi": escolher("semi") or (texto[0], "bold"),
+        "mono": mono,
+        "mono_semi": escolher("mono_semi") or (mono[0], "bold"),
+    }
+    for nome, (papel, tamanho) in _ESCALA.items():
+        familia, peso = papeis[papel]
+        f = _fontes_vivas.get(nome)
+        if f is None:
+            # A referencia precisa ser mantida: o Tk apaga a fonte nomeada
+            # quando o objeto Python e coletado.
+            f = _fontes_vivas[nome] = tkfont.Font(root=root, name=nome, family=familia,
+                                                  size=tamanho, weight=peso)
+        else:
+            f.configure(family=familia, size=tamanho, weight=peso)
+    return papeis
+
+
+_fontes_vivas = {}
+
+
+def espacado(texto):
+    """Simula espacamento entre letras (tracking) com espacos finos, para rotulos curtos."""
+    return "\u2009".join(texto)
 
 
 def carregar_logo(altura, escuro=None):
@@ -140,7 +253,7 @@ def aplicar_estilo_ttk(root):
            foreground=[("selected", T("TEXT_ON_ACCENT"))])
     st.configure("Treeview.Heading", background=T("CARD"), foreground=T("SUBTEXT"),
                  bordercolor=borda, lightcolor=T("CARD"), darkcolor=T("CARD"),
-                 relief="flat", font=("Segoe UI", 8, "bold"), padding=(6, 5))
+                 relief="flat", font=F_SECAO, padding=(6, 5))
     st.map("Treeview.Heading", background=[("active", T("ACCENT2"))])
 
     for orient in ("Vertical", "Horizontal"):

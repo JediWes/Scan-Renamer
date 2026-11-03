@@ -5,9 +5,9 @@ import threading
 import tkinter as tk
 from tkinter import filedialog
 
-from ..tema import T, FONT, FONT_SM, FONT_XS
+from ..tema import T, FONT, FONT_SM, FONT_XS, F_ABA, F_MINI, F_MONO_B, F_MONO_XS, F_PEQ_B, F_SECAO, espacado
 from . import anim
-from .widgets import Botao, CampoTexto
+from .widgets import Botao, CampoTexto, Odometro
 
 try:
     from watchdog.observers.winapi import WindowsApiObserver as Observer
@@ -52,7 +52,7 @@ class AbaDeclaracao(tk.Frame):
         left = tk.Frame(root, bg=T("PANEL"))
         left.pack(side="left", fill="both", expand=True, padx=(0, 16))
 
-        self._lbl(left, "PASTA MONITORADA")
+        self._lbl(left, "Pasta monitorada")
         rp = tk.Frame(left, bg=T("PANEL"))
         rp.pack(fill="x", pady=(4, 4))
         CampoTexto(rp, self.pasta_var, exemplo="Escolha a pasta onde o scanner salva os arquivos",
@@ -63,7 +63,7 @@ class AbaDeclaracao(tk.Frame):
         cr.pack(fill="x", pady=(4, 12))
         tk.Label(cr, text="Arquivos já numerados:", font=FONT_XS,
                  bg=T("PANEL"), fg=T("MUTED")).pack(side="left")
-        tk.Label(cr, textvariable=self.count_var, font=("Consolas", 9, "bold"),
+        tk.Label(cr, textvariable=self.count_var, font=F_MONO_B,
                  bg=T("PANEL"), fg=T("OK")).pack(side="left", padx=5)
         Botao(cr, "Atualizar", self._atualizar_contador_pasta, variante="fantasma", tamanho="sm",
               dica="Contar novamente os arquivos imageNNNNNN da pasta").pack(side="left")
@@ -73,21 +73,17 @@ class AbaDeclaracao(tk.Frame):
 
         tk.Frame(left, bg=T("SEP"), height=1).pack(fill="x", pady=(0, 12))
 
-        self._lbl(left, "PRÓXIMO NÚMERO")
+        self._lbl(left, "Próximo número")
         rn = tk.Frame(left, bg=T("PANEL"))
         rn.pack(fill="x", pady=(4, 12))
-        self._num_entry = tk.Entry(rn, textvariable=self.num_var,
-                                   font=("Consolas", 14, "bold"),
-                                   bg=T("ENTRY_BG"), fg=T("OK"), insertbackground=T("OK"),
-                                   relief="flat", bd=0, justify="center",
-                                   highlightbackground=T("BORDER"), highlightcolor=T("ACCENT"),
-                                   highlightthickness=1, width=14)
-        self._num_entry.pack(side="left", ipady=7, padx=(0, 8))
+        self._num_entry = Odometro(rn, self.num_var,
+                                   validar=lambda v: re.fullmatch(r"image\d{6}", v) is not None,
+                                   dica="Clique para editar. Enter confirma, Esc cancela.")
+        self._num_entry.pack(side="left", padx=(0, 10))
         Botao(rn, "Detectar", self._verificar_numeracao, variante="secundario",
               dica="Procura o maior imageNNNNNN da pasta e sugere o seguinte  (F2)").pack(side="left")
         tk.Label(rn, text="formato: image + 6 dígitos", font=FONT_XS,
                  bg=T("PANEL"), fg=T("MUTED")).pack(side="left", padx=12)
-        self.num_var.trace_add("write", lambda *_: self._realcar_numero())
 
         tk.Frame(left, bg=T("SEP"), height=1).pack(fill="x", pady=(0, 12))
 
@@ -96,7 +92,7 @@ class AbaDeclaracao(tk.Frame):
                          largura=200)
         self.btn.pack(fill="x", pady=(0, 8))
 
-        self.lbl_notif = tk.Label(left, text="", font=("Segoe UI", 9, "bold"),
+        self.lbl_notif = tk.Label(left, text="", font=F_PEQ_B,
                                   bg=T("NOTIF_BG"), fg=T("NOTIF_FG"),
                                   anchor="center", pady=5)
 
@@ -106,11 +102,11 @@ class AbaDeclaracao(tk.Frame):
         self._dot = tk.Frame(bar, bg=T("MUTED"), width=4)
         self._dot.pack(side="left", fill="y")
         self._resp = anim.Respiracao(self._dot, "bg", T("OK"), anim.misturar(T("OK"), T("CARD"), 0.75))
-        tk.Label(bar, text="STATUS", font=("Segoe UI", 7, "bold"),
+        tk.Label(bar, text=espacado("STATUS"), font=F_MINI,
                  bg=T("CARD"), fg=T("MUTED")).pack(side="left", padx=(10, 6), pady=7)
         self.lbl_status = tk.Label(bar, text="Parado", font=FONT_SM, bg=T("CARD"), fg=T("SUBTEXT"))
         self.lbl_status.pack(side="left")
-        self.lbl_counter = tk.Label(bar, text="", font=("Consolas", 9, "bold"),
+        self.lbl_counter = tk.Label(bar, text="", font=F_MONO_B,
                                     bg=T("CARD"), fg=T("OK"))
         self.lbl_counter.pack(side="right", padx=10)
 
@@ -120,7 +116,7 @@ class AbaDeclaracao(tk.Frame):
                          width=self.PW)
         right.pack(side="right", fill="y")
         right.pack_propagate(False)
-        tk.Label(right, text="ÚLTIMO ARQUIVO", font=("Segoe UI", 7, "bold"),
+        tk.Label(right, text=espacado("ÚLTIMO ARQUIVO"), font=F_MINI,
                  bg=T("CARD2"), fg=T("MUTED")).pack(pady=(10, 4))
         self._pcv = tk.Canvas(right, width=self.PW-20, height=self.PH,
                               bg=T("CARD"), highlightthickness=0, cursor="hand2")
@@ -128,7 +124,7 @@ class AbaDeclaracao(tk.Frame):
         self._pcv.bind("<Button-1>", self._abrir_visualizacao)
         self._prev_ref = None
         self._placeholder()
-        self.lbl_pnome = tk.Label(right, text="—", font=("Consolas", 8),
+        self.lbl_pnome = tk.Label(right, text="—", font=F_MONO_XS,
                                   bg=T("CARD2"), fg=T("MUTED"),
                                   wraplength=self.PW-16, justify="center")
         self.lbl_pnome.pack(pady=(6, 4), padx=6)
@@ -142,25 +138,25 @@ class AbaDeclaracao(tk.Frame):
         if self.pasta_valida():
             self._atualizar_contador_pasta()
 
-    def _realcar_numero(self):
-        anim.realcar(self._num_entry, "bg", T("NOTIF_BG"), T("ENTRY_BG"), 900)
-
     def _visual_monitorando(self, ativo):
         if ativo:
             self.btn_var.set("Parar monitoramento  [F5]")
             self.btn.configure(variante="perigo")
             self._resp.iniciar()
             p = self.pasta_var.get().strip()
-            self.lbl_status.configure(text=f"Monitorando  ·  {os.path.basename(p) or p}", fg=T("OK"))
+            anim.trocar_texto(self.lbl_status, f"Monitorando  ·  {os.path.basename(p) or p}", T("OK"))
         else:
             self.btn_var.set("Iniciar monitoramento  [F5]")
             self.btn.configure(variante="primario")
             self._resp.parar()
             anim.animar_cor(self._dot, "bg", T("MUTED"), 300)
-            self.lbl_status.configure(text="Parado", fg=T("SUBTEXT"))
+            anim.trocar_texto(self.lbl_status, "Parado", T("SUBTEXT"))
+            if self.total_renomeados:
+                anim.trocar_texto(self.lbl_counter,
+                                  f"{self.total_renomeados} renomeado(s) na última sessão", T("MUTED"))
 
     def _lbl(self, p, t):
-        tk.Label(p, text=t, font=("Segoe UI", 8, "bold"),
+        tk.Label(p, text=t, font=F_SECAO,
                  bg=T("PANEL"), fg=T("MUTED"), anchor="w").pack(fill="x", pady=(0, 2))
 
     def _placeholder(self):
@@ -168,8 +164,8 @@ class AbaDeclaracao(tk.Frame):
         self._pcv.delete("all")
         self._pcv.configure(bg=T("CARD"))
         self._pcv.create_rectangle(0, 0, W, H, fill=T("CARD"), outline="")
-        self._pcv.create_text(W//2, H//2-10, text="Sem prévia", font=("Segoe UI", 10), fill=T("MUTED"))
-        self._pcv.create_text(W//2, H//2+24, text="aguardando…", font=("Segoe UI", 8), fill=T("MUTED"))
+        self._pcv.create_text(W//2, H//2-10, text="Sem prévia", font=FONT, fill=T("MUTED"))
+        self._pcv.create_text(W//2, H//2+24, text="aguardando…", font=FONT_XS, fill=T("MUTED"))
 
     def flash_notificacao(self, nome, caminho):
         self._ultimo_caminho = caminho
@@ -209,9 +205,9 @@ class AbaDeclaracao(tk.Frame):
     def _no_prev(self, W, H, nome):
         ext = os.path.splitext(nome)[1][1:].upper() if "." in nome else "?"
         self._pcv.create_rectangle(0, 0, W, H, fill=T("CARD"), outline="")
-        self._pcv.create_text(W//2, H//2-14, text="Sem prévia", font=("Segoe UI", 10), fill=T("MUTED"))
-        self._pcv.create_text(W//2, H//2+18, text=ext, font=("Segoe UI", 10, "bold"), fill=T("SUBTEXT"))
-        self._pcv.create_text(W//2, H//2+36, text="sem visualização", font=("Segoe UI", 7), fill=T("MUTED"))
+        self._pcv.create_text(W//2, H//2-14, text="Sem prévia", font=FONT, fill=T("MUTED"))
+        self._pcv.create_text(W//2, H//2+18, text=ext, font=F_ABA, fill=T("SUBTEXT"))
+        self._pcv.create_text(W//2, H//2+36, text="sem visualização", font=FONT_XS, fill=T("MUTED"))
 
     def _abrir_pasta(self):
         p = self.pasta_var.get().strip()
@@ -252,8 +248,12 @@ class AbaDeclaracao(tk.Frame):
         if p and os.path.isdir(p):
             exts = set(self.get_prefs().get("extensoes", EXTENSOES_PADRAO))
             n = contar_arquivos_pasta(p, exts)
-            self.count_var.set(f"{n} arquivo{'s' if n != 1 else ''}")
+            anterior = getattr(self, "_contagem", None)
+            self._contagem = n
+            anim.contar(self, self.count_var, anterior, n,
+                        lambda k: f"{k} arquivo{'s' if k != 1 else ''}", 700)
         else:
+            self._contagem = None
             self.count_var.set("—")
 
     def _escolher_pasta(self):
@@ -289,7 +289,7 @@ class AbaDeclaracao(tk.Frame):
         m = re.fullmatch(r"image(\d{6})", self.num_var.get().strip().lower())
         if not m:
             self.notificar("Numeração inválida", "Use image seguido de 6 dígitos, por exemplo image397568.", "erro")
-            anim.realcar(self._num_entry, "bg", anim.misturar(T("ERR"), T("ENTRY_BG"), 0.6), T("ENTRY_BG"), 1200)
+            self._num_entry.realcar(anim.misturar(T("ERR"), T("ENTRY_BG"), 0.55))
             return
         prefs = self.get_prefs()
         self.proximo_numero = int(m.group(1)); self.total_renomeados = 0

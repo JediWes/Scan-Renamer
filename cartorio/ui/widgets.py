@@ -3,7 +3,7 @@ notificacoes, barra de atividade, dicas e campo com texto de exemplo."""
 import tkinter as tk
 import tkinter.font as tkfont
 
-from ..tema import T, FONT_SM, FONT_XS
+from ..tema import T, FONT, FONT_SM, FONT_XS, F_ABA, F_BOTAO, F_BOTAO_LG, F_BOTAO_SM, F_BOTAO_XL, F_DISPLAY, F_PEQ_B
 from . import anim
 
 
@@ -34,17 +34,18 @@ class Botao(tk.Canvas):
     Aceita configure(text=..., state=..., variante=...) e ["state"].
     """
     TAMANHOS = {
-        "sm": (FONT_XS, 10, 4),
-        "md": (FONT_SM, 14, 7),
-        "lg": (("Segoe UI", 11, "bold"), 20, 12),
-        "xl": (("Segoe UI", 15, "bold"), 20, 22),
+        "sm": (F_BOTAO_SM, 10, 4),
+        "md": (F_BOTAO, 14, 7),
+        "lg": (F_BOTAO_LG, 20, 12),
+        "xl": (F_BOTAO_XL, 20, 22),
     }
     RAIO = 7
 
     def __init__(self, pai, texto="", comando=None, variante="primario", tamanho="md",
                  textvariable=None, largura=None, fonte=None, dica=None, **kw):
         fonte_base, self._padx, self._pady = self.TAMANHOS[tamanho]
-        self._fonte = tkfont.Font(font=fonte or fonte_base)
+        f = fonte or fonte_base
+        self._fonte = tkfont.nametofont(f) if isinstance(f, str) else tkfont.Font(font=f)
         self._texto = textvariable.get() if textvariable else texto
         self._largura_fixa = largura
         self._comando = comando
@@ -123,7 +124,8 @@ class Botao(tk.Canvas):
             img = _imagem_arredondada(self, max(2, self._larg), max(2, self._alt), cor, self.RAIO, inset)
             self._cache[chave] = img
         self.itemconfigure(self._img, image=img)
-        self.itemconfigure(self._txt, fill=self._cor_texto())
+        if (str(self), "rotulo") not in anim._ativas:
+            self.itemconfigure(self._txt, fill=self._cor_texto())
 
     def _transicao(self, dur=150):
         inicio, fim = self._cor, self._cor_alvo()
@@ -138,11 +140,30 @@ class Botao(tk.Canvas):
             self.coords(self._txt, e.width / 2, e.height / 2)
             self._desenhar(self._cor)
 
-    def _definir_texto(self, texto):
-        self._texto = texto
-        self.itemconfigure(self._txt, text=texto)
+    def _definir_texto(self, texto, animar=True):
+        anterior, self._texto = self._texto, texto
         if not self._largura_fixa:
             super().configure(width=self._medir())
+        if not animar or anterior == texto or not self.winfo_ismapped():
+            self.itemconfigure(self._txt, text=texto)
+            return
+        # O texto antigo sobe e esmaece; o novo entra por baixo
+        anim.parar(self, "rotulo")
+        for item in self.find_withtag("saindo"):
+            self.delete(item)
+        velho = self._txt
+        self.itemconfigure(velho, tags=("saindo",))
+        cx, cy, d = self._larg / 2, self._alt / 2, self._alt * 0.55
+        self._txt = self.create_text(cx, cy + d, text=texto, font=self._fonte,
+                                     justify="center", fill=self._cor)
+
+        def quadro(p):
+            fundo, cor = self._cor, self._cor_texto()
+            self.coords(velho, cx, cy - d * p)
+            self.itemconfigure(velho, fill=anim.misturar(cor, fundo, min(1, p * 1.6)))
+            self.coords(self._txt, cx, cy + d * (1 - p))
+            self.itemconfigure(self._txt, fill=anim.misturar(fundo, cor, p))
+        anim.animar(self, "rotulo", 260, quadro, ao_fim=lambda: self.delete(velho))
 
     # eventos
 
@@ -222,7 +243,7 @@ class AbasDeslizantes(tk.Frame):
         linha = tk.Frame(self, bg=bg)
         linha.pack(side="left", padx=(20, 0))
         for nome in nomes:
-            lb = tk.Label(linha, text=nome, font=("Segoe UI", 10), bg=bg, fg=T("MUTED"),
+            lb = tk.Label(linha, text=nome, font=F_ABA, bg=bg, fg=T("MUTED"),
                           padx=14, pady=10, cursor="hand2")
             lb.pack(side="left")
             lb.bind("<Button-1>", lambda e, n=nome: self.selecionar(n))
@@ -251,7 +272,6 @@ class AbasDeslizantes(tk.Frame):
         anterior, self._atual = self._atual, nome
         for n, lb in self._labels.items():
             ativo = n == nome
-            lb.configure(font=("Segoe UI", 10, "bold") if ativo else ("Segoe UI", 10))
             anim.animar_cor(lb, "fg", T("TEXT") if ativo else T("MUTED"), 160)
         self.update_idletasks()
         x1, w1 = self._geometria(nome)
@@ -275,14 +295,14 @@ class Segmentado(tk.Canvas):
     PAD = 3
     RAIO = 6
 
-    def __init__(self, pai, opcoes, ao_selecionar, fonte=("Segoe UI", 10)):
-        self._fonte = tkfont.Font(font=fonte)
-        self._fonte_b = tkfont.Font(font=(fonte[0], fonte[1], "bold"))
+    def __init__(self, pai, opcoes, ao_selecionar, fonte=FONT, fonte_ativa=F_ABA):
+        self._fonte = fonte
+        self._fonte_b = fonte_ativa
         self._opcoes = list(opcoes)
         self._ao_selecionar = ao_selecionar
-        larg = max(self._fonte_b.measure(o) for o in self._opcoes) + 36
+        larg = max(tkfont.nametofont(self._fonte_b).measure(o) for o in self._opcoes) + 36
         self._seg_w = larg
-        h = self._fonte.metrics("linespace") + 16
+        h = tkfont.nametofont(self._fonte).metrics("linespace") + 16
         w = larg * len(self._opcoes) + 2 * self.PAD
         super().__init__(pai, width=w, height=h + 2 * self.PAD, bg=_fundo_de(pai),
                          highlightthickness=0, bd=0, cursor="hand2")
@@ -369,7 +389,7 @@ class Notificador:
         tk.Frame(caixa, bg=cor, width=4).pack(side="left", fill="y")
         corpo = tk.Frame(caixa, bg=T("CARD"), padx=12, pady=9)
         corpo.pack(side="left", fill="both", expand=True)
-        tk.Label(corpo, text=titulo, font=("Segoe UI", 9, "bold"), bg=T("CARD"),
+        tk.Label(corpo, text=titulo, font=F_PEQ_B, bg=T("CARD"),
                  fg=T("TEXT"), anchor="w", justify="left",
                  wraplength=self.LARGURA - 40).pack(fill="x")
         if mensagem:
@@ -477,19 +497,22 @@ class Dica:
 
     def _agendar(self, _):
         self._cancelar()
-        self._job = self.widget.after(self.ATRASO_MS, self._mostrar)
+        self._job = self.widget._root().after(self.ATRASO_MS, self._mostrar)
 
     def _cancelar(self):
         if self._job:
             try:
-                self.widget.after_cancel(self._job)
+                self.widget._root().after_cancel(self._job)
             except Exception:
                 pass
             self._job = None
 
     def _mostrar(self):
         self._job = None
-        if self._janela or not self.widget.winfo_exists():
+        try:
+            if self._janela or not self.widget.winfo_exists():
+                return
+        except tk.TclError:
             return
         x = self.widget.winfo_rootx()
         y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
@@ -544,3 +567,138 @@ class CampoTexto(tk.Entry):
             self._rotulo.place_forget()
         else:
             self._rotulo.place(x=6, rely=0.5, anchor="w")
+
+
+# Numero em estilo odometro
+
+class Odometro(tk.Canvas):
+    """
+    Mostra o valor de uma StringVar com fonte mono; quando muda, so os caracteres
+    alterados rolam (para cima se o numero cresce, para baixo se diminui).
+    Clique para editar: um campo aparece no lugar e Enter confirma.
+    """
+    PADX, PADY = 14, 8
+
+    def __init__(self, pai, variavel, caracteres=11, fonte=F_DISPLAY, cor=None, fundo=None,
+                 validar=None, dica=None):
+        self._fonte = tkfont.nametofont(fonte)
+        self._fonte_nome = fonte
+        self._cw = self._fonte.measure("0")
+        self._lh = self._fonte.metrics("linespace")
+        self._cor = cor or T("OK")
+        self._fundo = fundo or T("ENTRY_BG")
+        self._var = variavel
+        self._validar = validar or (lambda v: True)
+        w = self._cw * caracteres + 2 * self.PADX
+        h = self._lh + 2 * self.PADY
+        super().__init__(pai, width=w, height=h, bg=self._fundo, highlightthickness=1,
+                         highlightbackground=T("BORDER"), bd=0, cursor="xterm")
+        self._larg, self._alt = w, h
+        self._itens = []
+        self._valor = ""
+        self._desenhar_estatico(variavel.get())
+        self._trace = variavel.trace_add("write", lambda *_: self._mudou())
+        self.bind("<Destroy>", self._remover_trace, add="+")
+        self.bind("<Button-1>", lambda e: self.editar())
+        self.bind("<Enter>", lambda e: self.configure(highlightbackground=T("ACCENT")))
+        self.bind("<Leave>", lambda e: self.configure(highlightbackground=T("BORDER")))
+        self._entrada = None
+        if dica:
+            Dica(self, dica)
+
+    def _remover_trace(self, _=None):
+        try:
+            self._var.trace_remove("write", self._trace)
+        except Exception:
+            pass
+
+    def _x(self, i, n):
+        inicio = (self._larg - self._cw * n) / 2
+        return inicio + self._cw * i + self._cw / 2
+
+    def _desenhar_estatico(self, valor):
+        for it in self._itens:
+            self.delete(it)
+        cy = self._alt / 2
+        self._itens = [self.create_text(self._x(i, len(valor)), cy, text=c, font=self._fonte_nome,
+                                        fill=self._cor) for i, c in enumerate(valor)]
+        self._valor = valor
+
+    def _numero(self, valor):
+        dig = "".join(c for c in valor if c.isdigit())
+        return int(dig) if dig else None
+
+    def _mudou(self):
+        novo, velho = self._var.get(), self._valor
+        if novo == velho:
+            return
+        if len(novo) != len(velho) or not self.winfo_ismapped():
+            self._desenhar_estatico(novo)
+            return
+        a, b = self._numero(velho), self._numero(novo)
+        sentido = -1 if (a is not None and b is not None and b < a) else 1
+        cy, d = self._alt / 2, self._lh * 0.9
+        anim.parar(self, "odometro")
+        self._desenhar_estatico(velho)
+        mudam = [i for i, (x, y) in enumerate(zip(velho, novo)) if x != y]
+        pares = []
+        for i in mudam:
+            sai = self._itens[i]
+            entra = self.create_text(self._x(i, len(novo)), cy + d * sentido, text=novo[i],
+                                     font=self._fonte_nome, fill=self._fundo)
+            pares.append((i, sai, entra))
+        self._valor = novo
+        n = len(novo)
+
+        def quadro(p):
+            for i, sai, entra in pares:
+                # Digitos mais a direita rolam primeiro, como num odometro
+                atraso = (n - 1 - i) * 0.06
+                q = max(0.0, min(1.0, (p - atraso) / max(0.01, 1 - atraso)))
+                q = anim.ease_out_back(q, 1.2) if q < 1 else 1
+                x = self._x(i, n)
+                self.coords(sai, x, cy - d * sentido * q)
+                self.itemconfigure(sai, fill=anim.misturar(self._cor, self._fundo, min(1, q * 1.4)))
+                self.coords(entra, x, cy + d * sentido * (1 - q))
+                self.itemconfigure(entra, fill=anim.misturar(self._fundo, self._cor, min(1, q)))
+
+        def fim():
+            for i, sai, entra in pares:
+                self.delete(sai)
+                self._itens[i] = entra
+        anim.animar(self, "odometro", 380 + 30 * len(pares), quadro, ao_fim=fim,
+                    easing=lambda t: t)
+
+    def realcar(self, cor):
+        anim.realcar(self, "bg", cor, self._fundo, 1100)
+
+    # edicao
+
+    def editar(self):
+        if self._entrada is not None:
+            return
+        tmp = tk.StringVar(value=self._var.get())
+        e = tk.Entry(self, textvariable=tmp, font=self._fonte_nome, justify="center",
+                     bg=self._fundo, fg=self._cor, insertbackground=self._cor,
+                     relief="flat", bd=0, highlightthickness=0)
+        e.place(x=0, y=0, relwidth=1, relheight=1)
+        e.focus_set()
+        e.select_range(0, "end")
+        self._entrada = e
+
+        def confirmar(_=None):
+            v = tmp.get().strip().lower()
+            fechar()
+            if self._validar(v):
+                self._var.set(v)
+            else:
+                self.realcar(anim.misturar(T("ERR"), self._fundo, 0.55))
+
+        def fechar(_=None):
+            if self._entrada is not None:
+                self._entrada.destroy()
+                self._entrada = None
+        e.bind("<Return>", confirmar)
+        e.bind("<KP_Enter>", confirmar)
+        e.bind("<FocusOut>", confirmar)
+        e.bind("<Escape>", fechar)

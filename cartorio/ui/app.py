@@ -10,7 +10,7 @@ from ..config import carregar_preferencias, salvar_preferencias
 from ..constantes import VERSAO, TIPOS, EXTENSOES_PADRAO
 from ..renomeador import ignorar_temporariamente
 from ..scanner import aquecer_powershell, encerrar_powershell
-from ..tema import T, FONT_XS, aplicar_estilo_ttk, carregar_logo
+from ..tema import T, FONT_XS, F_MONO, F_SECAO, F_SUBTITULO, F_TITULO, aplicar_estilo_ttk, carregar_logo, configurar_fontes, registrar_fontes_embutidas
 from . import anim
 from .aba_declaracao import AbaDeclaracao
 from .aba_scanner import AbaScanner
@@ -22,7 +22,9 @@ from .widgets import AbasDeslizantes, Botao, Notificador, Segmentado
 
 class App(tk.Tk):
     def __init__(self):
+        registrar_fontes_embutidas()   # antes de criar a janela Tk
         super().__init__()
+        configurar_fontes(self)
         prefs = carregar_preferencias()
         tema.definir_tema(prefs.get("tema", "escuro"))
         self._prefs = {
@@ -243,6 +245,12 @@ class App(tk.Tk):
     def report_callback_exception(self, exc, val, tb):
         """Erros em callbacks do Tk aparecem no log em vez de sumir."""
         import traceback
+        # Particularidade do Tkinter: callback agendado em widget ja destruido
+        # falha ao ser limpo. Nao afeta o app; ignorado.
+        if isinstance(val, AttributeError) and "'remove'" in str(val):
+            ultimo = traceback.extract_tb(tb)[-1] if tb else None
+            if ultimo and ultimo.name in ("deletecommand", "callit"):
+                return
         detalhe = "".join(traceback.format_exception(exc, val, tb))
         try:
             self._log_global(f"Erro interno: {val}", "err")
@@ -293,11 +301,11 @@ class App(tk.Tk):
             self._logo_hdr = carregar_logo(52)
             tk.Label(hi, image=self._logo_hdr, bg=T("SIDEBAR")).pack(side="left")
         except Exception:
-            tk.Label(hi, text="Cartório Santa Cruz", font=("Segoe UI", 13, "bold"),
+            tk.Label(hi, text="Cartório Santa Cruz", font=F_TITULO,
                      bg=T("SIDEBAR"), fg=T("TEXT")).pack(side="left")
         tit = tk.Frame(hi, bg=T("SIDEBAR"))
         tit.pack(side="left", padx=(18, 0))
-        tk.Label(tit, text="Renomeador de Declarações", font=("Segoe UI", 11, "bold"),
+        tk.Label(tit, text="Renomeador de Declarações", font=F_SUBTITULO,
                  bg=T("SIDEBAR"), fg=T("TEXT"), anchor="w").pack(anchor="w")
         tk.Label(tit, text=f"Versão {VERSAO}", font=FONT_XS,
                  bg=T("SIDEBAR"), fg=T("MUTED"), anchor="w").pack(anchor="w")
@@ -388,7 +396,7 @@ class App(tk.Tk):
         # Log
         lh = tk.Frame(ren_body, bg=T("BG"))
         lh.pack(fill="x", pady=(14, 6))
-        tk.Label(lh, text="ATIVIDADE", font=("Segoe UI", 8, "bold"),
+        tk.Label(lh, text="Atividade", font=F_SECAO,
                  bg=T("BG"), fg=T("MUTED")).pack(side="left")
         Botao(lh, "Limpar", self._limpar_log, variante="secundario", tamanho="sm",
               dica="Limpar a lista  (Ctrl+L)").pack(side="right")
@@ -398,7 +406,7 @@ class App(tk.Tk):
         lw = tk.Frame(ren_body, bg=T("LOG_BG"),
                       highlightbackground=T("BORDER"), highlightthickness=1)
         lw.pack(fill="both", expand=True)
-        self.log_text = tk.Text(lw, font=("Consolas", 9),
+        self.log_text = tk.Text(lw, font=F_MONO,
                                 bg=T("LOG_BG"), fg=T("LOG_FG"),
                                 relief="flat", bd=0, state="disabled",
                                 wrap="word", padx=12, pady=10, highlightthickness=0,

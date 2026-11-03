@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from .. import historico
-from ..tema import T, FONT_XS
+from ..tema import T, FONT_XS, F_TITULO
 from . import anim
 from .widgets import Botao
 
@@ -35,7 +35,7 @@ class JanelaHistorico(tk.Toplevel):
     def _build(self):
         topo = tk.Frame(self, bg=T("BG"), padx=20, pady=14)
         topo.pack(fill="x")
-        tk.Label(topo, text="Histórico", font=("Segoe UI", 12, "bold"),
+        tk.Label(topo, text="Histórico", font=F_TITULO,
                  bg=T("BG"), fg=T("TEXT")).pack(side="left")
         self._info = tk.Label(topo, text="", font=FONT_XS, bg=T("BG"), fg=T("MUTED"))
         self._info.pack(side="left", padx=(12, 0), pady=(4, 0))
