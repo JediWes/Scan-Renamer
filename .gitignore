@@ -21,3 +21,6 @@ Renomeador_Cartorio.exe
 # Windows
 Thumbs.db
 desktop.ini
+
+# Log de erros
+erros.log

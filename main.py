@@ -409,6 +409,9 @@ def tifs_para_pdf(tif_paths, pdf_path, resolucao=300):
 
 
 #  Presets de scanner 
+# Chave reservada no arquivo de presets: guarda a ultima configuracao usada.
+PRESET_ULTIMO = "__ultimo__"
+
 def carregar_presets():
     try:
         with open(SCANNER_CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -437,6 +440,7 @@ class AbaScanner(tk.Frame):
         self._tmp_dir      = None
         self._build()
         self._atualizar_menu_presets()
+        self._aplicar_config(self._presets.get(PRESET_ULTIMO, {}))
         self.after(300, self._detectar_dispositivos)
 
     def _build(self):
@@ -538,6 +542,16 @@ class AbaScanner(tk.Frame):
                        selectcolor=T("ACCENT2"), activebackground=T("BG"),
                        highlightthickness=0, bd=0).pack(anchor="w")
 
+        lbl("Nome do arquivo:", 2, 0)
+        self.perg_nome_var = tk.BooleanVar(value=False)
+        nf = tk.Frame(grid, bg=T("BG"))
+        nf.grid(row=2, column=1, columnspan=3, sticky="w", pady=5)
+        tk.Checkbutton(nf, variable=self.perg_nome_var,
+                       text="Perguntar o nome ao salvar o PDF",
+                       font=FONT_SM, bg=T("BG"), fg=T("TEXT"),
+                       selectcolor=T("ACCENT2"), activebackground=T("BG"),
+                       highlightthickness=0, bd=0).pack(anchor="w")
+
         tk.Frame(left, bg=T("SEP"), height=1).pack(fill="x", pady=(14, 12))
 
         # Pasta destino
@@ -583,14 +597,38 @@ class AbaScanner(tk.Frame):
                  font=("Consolas", 9, "bold"),
                  bg=T("BG"), fg=T("OK")).pack(padx=10, anchor="w")
 
+        # Acoes da sessao: permitem concluir ou descartar paginas acumuladas
+        acoes = tk.Frame(right, bg=T("BG"))
+        acoes.pack(fill="x", padx=10, pady=(8, 0))
+        self._btn_concluir = tk.Button(acoes, text="Salvar PDF agora", font=FONT_SM,
+                                       bg=T("ACCENT"), fg=T("TEXT_ON_ACCENT"),
+                                       relief="flat", cursor="hand2", padx=10, pady=6, bd=0,
+                                       activebackground=T("ACCENT2"),
+                                       activeforeground=T("TEXT_ON_ACCENT"),
+                                       command=self._finalizar_pdf, state="disabled",
+                                       disabledforeground=T("MUTED"))
+        self._btn_concluir.pack(fill="x", pady=(0, 4))
+        self._btn_descartar = tk.Button(acoes, text="Descartar páginas", font=FONT_SM,
+                                        bg=T("BTN_SEC_BG"), fg=T("BTN_SEC_FG"),
+                                        relief="flat", cursor="hand2", padx=10, pady=6, bd=0,
+                                        activebackground=T("DANGER"),
+                                        activeforeground=T("TEXT_ON_ACCENT"),
+                                        command=self._descartar_sessao, state="disabled",
+                                        disabledforeground=T("MUTED"))
+        self._btn_descartar.pack(fill="x")
+        self._atualizar_botoes_sessao()
+
     def _sec(self, p, t):
         tk.Label(p, text=t, font=("Segoe UI", 8, "bold"),
                  bg=T("BG"), fg=T("MUTED"), anchor="w").pack(fill="x", pady=(0, 2))
 
     def _escolher_pasta(self):
-        p = filedialog.askdirectory(title="Pasta de destino para os scans")
+        p = filedialog.askdirectory(title="Pasta de destino para os scans",
+                                    initialdir=self.dest_var.get() or None,
+                                    parent=self.winfo_toplevel())
         if p:
             self.dest_var.set(os.path.normpath(p))
+            self._salvar_ultimo()
 
     def _detectar_dispositivos(self):
         self.dev_var.set("Detectando...")
@@ -623,30 +661,12 @@ class AbaScanner(tk.Frame):
         menu.delete(0, "end")
         menu.add_command(label="-- manual --",
                          command=lambda: self.preset_var.set("-- manual --"))
-        for nome in sorted(self._presets.keys()):
+        for nome in sorted(k for k in self._presets if k != PRESET_ULTIMO):
             menu.add_command(label=nome,
                              command=lambda n=nome: self._carregar_preset(n))
 
-    def _carregar_preset(self, nome):
-        if nome == "-- manual --":
-            return
-        p = self._presets.get(nome, {})
-        self.preset_var.set(nome)
-        self.res_var.set(str(p.get("resolucao", "300")))
-        self.cor_var.set(p.get("cor", "Colorido") if p.get("cor") in MODOS_COR_LABEL else "Colorido")
-        self.duplex_var.set(p.get("duplex", False))
-        self.multipag_var.set(p.get("multipag", False))
-        self.perg_nome_var.set(p.get("perg_nome", False))
-        pasta = p.get("pasta", "")
-        if pasta:
-            self.dest_var.set(pasta)
-
-    def _salvar_preset(self):
-        nome = simpledialog.askstring("Salvar preset", "Nome do preset:", parent=self)
-        if not nome or not nome.strip():
-            return
-        nome = nome.strip()
-        self._presets[nome] = {
+    def _config_atual(self):
+        return {
             "resolucao":  int(self.res_var.get()),
             "cor":        self.cor_var.get(),
             "duplex":     self.duplex_var.get(),
@@ -654,10 +674,57 @@ class AbaScanner(tk.Frame):
             "perg_nome":  self.perg_nome_var.get(),
             "pasta":      self.dest_var.get().strip(),
         }
+
+    def _aplicar_config(self, p):
+        if not p:
+            return
+        res = str(p.get("resolucao", "300"))
+        self.res_var.set(res if res in self.RESOLUCOES else "300")
+        cor = p.get("cor", "Colorido")
+        self.cor_var.set(cor if cor in MODOS_COR_LABEL else "Colorido")
+        self.duplex_var.set(bool(p.get("duplex", False)))
+        self.multipag_var.set(bool(p.get("multipag", False)))
+        self.perg_nome_var.set(bool(p.get("perg_nome", False)))
+        pasta = p.get("pasta", "")
+        if pasta:
+            self.dest_var.set(pasta)
+
+    def _salvar_ultimo(self):
+        self._presets[PRESET_ULTIMO] = self._config_atual()
+        salvar_presets(self._presets)
+
+    def _carregar_preset(self, nome):
+        if nome == "-- manual --" or nome not in self._presets:
+            return
+        self.preset_var.set(nome)
+        self._aplicar_config(self._presets[nome])
+        pasta = self.dest_var.get().strip()
+        if pasta and not os.path.isdir(pasta):
+            self._set_status("Pasta do preset não encontrada: " + pasta, T("WARN"))
+        else:
+            self._set_status("Preset carregado: " + nome)
+
+    def _salvar_preset(self):
+        nome = simpledialog.askstring("Salvar preset", "Nome do preset:",
+                                      initialvalue=self.preset_var.get()
+                                      if self.preset_var.get() != "-- manual --" else "",
+                                      parent=self.winfo_toplevel())
+        if not nome or not nome.strip():
+            return
+        nome = nome.strip()
+        if nome == PRESET_ULTIMO:
+            return
+        if not self.dest_var.get().strip():
+            if not messagebox.askyesno("Preset sem pasta",
+                                       "Nenhuma pasta de destino definida.\n"
+                                       "Salvar o preset assim mesmo?",
+                                       parent=self.winfo_toplevel()):
+                return
+        self._presets[nome] = self._config_atual()
         salvar_presets(self._presets)
         self._atualizar_menu_presets()
         self.preset_var.set(nome)
-        self._set_status("Preset salvo.")
+        self._set_status("Preset salvo: " + nome)
 
     def _excluir_preset(self):
         nome = self.preset_var.get()
@@ -687,22 +754,43 @@ class AbaScanner(tk.Frame):
                 pass
         self._tmp_dir = None
         self._pags_var.set("")
+        self._atualizar_botoes_sessao()
+
+    def _atualizar_botoes_sessao(self, ocupado=False):
+        tem = bool(self._tifs_sessao)
+        ativo = tem and not ocupado
+        self._btn_concluir.configure(state="normal" if ativo else "disabled",
+                                     bg=T("ACCENT") if ativo else T("CARD"))
+        self._btn_descartar.configure(state="normal" if ativo else "disabled")
+
+    def _descartar_sessao(self):
+        n = len(self._tifs_sessao)
+        if not n:
+            return
+        if not messagebox.askyesno("Descartar páginas",
+                                   f"Descartar {n} página(s) acumulada(s)?",
+                                   parent=self.winfo_toplevel()):
+            return
+        self._limpar_sessao()
+        self._set_status("Páginas descartadas.")
 
     def _iniciar_sessao(self):
         pasta = self.dest_var.get().strip()
-        if not pasta:
+        if not pasta or not os.path.isdir(pasta):
             messagebox.showerror("Pasta inválida",
-                                 "Selecione a pasta de destino antes de escanear.",
+                                 "Selecione uma pasta de destino existente antes de escanear.",
                                  parent=self.winfo_toplevel())
             return
+        self._salvar_ultimo()
         import tempfile
         if self._tmp_dir is None:
             self._tmp_dir = tempfile.mkdtemp(prefix="scan_")
             self._tifs_sessao = []
         self._btn_scan.configure(state="disabled")
+        self._atualizar_botoes_sessao(ocupado=True)
         self._set_status("Digitalizando…", T("WARN"))
         self.update()
-        modo_cor  = MODOS_COR_LABEL.get(self.cor_var.get(), 'Colorido')
+        modo_cor  = MODOS_COR_LABEL.get(self.cor_var.get(), 'cor')
         res       = int(self.res_var.get())
         duplex    = self.duplex_var.get()
         multipag  = self.multipag_var.get()
@@ -723,26 +811,27 @@ class AbaScanner(tk.Frame):
                 def _pos_scan():
                     n = len(self._tifs_sessao)
                     self._pags_var.set(str(n) + " página(s) acumulada(s)")
+                    self._btn_scan.configure(state="normal")
+                    self._atualizar_botoes_sessao()
                     if multipag:
-                        msg = (str(n) + " pagina(s) acumulada(s).\n\n"
-                               "Coloque a proxima pagina e clique Sim\n"
-                               "para escanear, ou Nao para gerar o PDF.")
+                        msg = (str(n) + " página(s) acumulada(s).\n\n"
+                               "Sim: escanear a próxima página\n"
+                               "Não: salvar o PDF agora")
                         continuar = messagebox.askyesno("Continuar?", msg,
                                                          parent=self.winfo_toplevel())
                         if continuar:
-                            self._set_status("Pronto para a próxima página.", T("WARN"))
+                            self._set_status("Escaneando a próxima página…", T("WARN"))
                             self._iniciar_sessao()
                         else:
-                            self._btn_scan.configure(state="normal")
                             self._finalizar_pdf()
                     else:
-                        self._btn_scan.configure(state="normal")
                         self._finalizar_pdf()
                 self.after(0, _pos_scan)
             except Exception as e:
                 msg = str(e)
                 def _err():
                     self._btn_scan.configure(state="normal")
+                    self._atualizar_botoes_sessao()
                     self._set_status("Erro: " + msg[:60], T("DANGER"))
                     messagebox.showerror("Erro no scanner",
                                          "Falha ao digitalizar:\n\n" + msg,
@@ -756,6 +845,13 @@ class AbaScanner(tk.Frame):
             return
         pasta = self.dest_var.get().strip()
         res   = int(self.res_var.get())
+        if not pasta or not os.path.isdir(pasta):
+            messagebox.showerror("Pasta inválida",
+                                 "A pasta de destino não existe. Escolha outra e "
+                                 "clique em \"Salvar PDF agora\".",
+                                 parent=self.winfo_toplevel())
+            self._set_status("Páginas mantidas. Defina a pasta e salve.", T("WARN"))
+            return
         # Pergunta o nome se opção estiver marcada
         if self.perg_nome_var.get():
             sugestao = "scan_" + time.strftime("%Y%m%d_%H%M%S")
@@ -766,11 +862,9 @@ class AbaScanner(tk.Frame):
                 parent=self.winfo_toplevel()
             )
             if not nome_pdf or not nome_pdf.strip():
-                # Usuário cancelou — mantém sessão aberta
-                self._btn_scan.configure(state="normal")
-                self._set_status("Nomear cancelado. Sessao mantida.")
+                self._set_status("Nome cancelado. Páginas mantidas.", T("WARN"))
                 return
-            nome_pdf = nome_pdf.strip()
+            nome_pdf = re.sub(r'[<>:"/\\|?*]', "_", nome_pdf.strip())
             # Remove .pdf se o usuário digitou com extensão
             if nome_pdf.lower().endswith(".pdf"):
                 nome_pdf = nome_pdf[:-4]
@@ -781,20 +875,21 @@ class AbaScanner(tk.Frame):
         if os.path.exists(pdf_path):
             if not messagebox.askyesno(
                     "Arquivo existente",
-                    "O arquivo " + nome_pdf + ".pdf ja existe.\nSobrescrever?",
+                    "O arquivo " + nome_pdf + ".pdf já existe.\nSobrescrever?",
                     parent=self.winfo_toplevel()):
-                self._btn_scan.configure(state="normal")
-                self._set_status("Salvar cancelado. Sessao mantida.")
+                self._set_status("Salvamento cancelado. Páginas mantidas.", T("WARN"))
                 return
         try:
             tifs_para_pdf(self._tifs_sessao, pdf_path, resolucao=res)
         except Exception as e:
-            messagebox.showerror("Erro", str(e), parent=self.winfo_toplevel())
+            messagebox.showerror("Erro ao salvar PDF", str(e), parent=self.winfo_toplevel())
+            self._set_status("Falha ao salvar. Páginas mantidas.", T("ERR"))
+            self.log_cb("Falha ao salvar scan: " + str(e), "err")
             return
         nome_exib = os.path.basename(pdf_path)
         self._limpar_sessao()
         self._set_status("Salvo: " + nome_exib, T("OK"))
-        self.log_cb("Scan salvo: " + nome_exib, "ok")
+        self.log_cb("Scan salvo: " + pdf_path, "ok")
 
 
 class SplashScreen(tk.Toplevel):
@@ -1722,6 +1817,11 @@ class App(tk.Tk):
             aba.monitorando = False
             aba.observer    = None
 
+        # Sessao de scan em andamento sobrevive a reconstrucao da interface
+        sc = self._aba_scanner
+        sessao_scan = (sc._config_atual(), sc._tifs_sessao, sc._tmp_dir)
+        sc._tmp_dir = None
+
         for w in list(self.winfo_children()):
             try:
                 w.destroy()
@@ -1730,6 +1830,14 @@ class App(tk.Tk):
         self.configure(bg=T("BG"))
         self._build_ui()
         self._bind_shortcuts()
+
+        cfg, tifs, tmp = sessao_scan
+        sc = self._aba_scanner
+        sc._aplicar_config(cfg)
+        sc._tifs_sessao, sc._tmp_dir = tifs, tmp
+        if tifs:
+            sc._pags_var.set(str(len(tifs)) + " página(s) acumulada(s)")
+        sc._atualizar_botoes_sessao()
 
         # Restaura aba principal
         if main_ativa in self._main_frames:
@@ -1768,7 +1876,29 @@ class App(tk.Tk):
             if p and os.path.isdir(p) and not aba.monitorando:
                 aba._iniciar()
 
+    def report_callback_exception(self, exc, val, tb):
+        """Erros em callbacks do Tk aparecem no log em vez de sumir."""
+        import traceback
+        detalhe = "".join(traceback.format_exception(exc, val, tb))
+        try:
+            self._log_global(f"Erro interno: {val}", "err")
+        except Exception:
+            pass
+        try:
+            with open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "erros.log"), "a", encoding="utf-8") as f:
+                f.write(time.strftime("[%Y-%m-%d %H:%M:%S]\n") + detalhe + "\n")
+        except Exception:
+            pass
+        messagebox.showerror("Erro", f"Ocorreu um erro inesperado:\n\n{val}", parent=self)
+
     def _fechar(self):
+        pend = len(self._aba_scanner._tifs_sessao)
+        if pend and not messagebox.askyesno(
+                "Páginas não salvas",
+                f"Há {pend} página(s) escaneada(s) sem salvar.\n\nFechar e descartar?",
+                icon="warning", parent=self):
+            return
         ativos = [t for t, a in self.abas.items() if a.monitorando]
         if ativos:
             if not messagebox.askyesno(
@@ -1781,6 +1911,7 @@ class App(tk.Tk):
         self._prefs["geometria"] = self.geometry()
         self._prefs["aba_principal"] = self._main_tab_var.get()
         salvar_preferencias(self._prefs)
+        self._aba_scanner._limpar_sessao()
         self.destroy()
 
     # UI
