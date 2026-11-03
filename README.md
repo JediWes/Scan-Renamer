@@ -8,8 +8,12 @@ Sistema desktop desenvolvido em Python para automatização do fluxo de digitali
 - **Scanner integrado** — controle completo do Brother DS-940DW via WIA (resolução, cor, duplex, múltiplas páginas, presets)
 - **Visualizador** — preview de imagens e PDFs com zoom
 - **Modo lote** — renomeia arquivos já existentes na pasta
-- **Temas** — modo escuro e claro
+- **Temas** — modo escuro e claro, com tamanho de janela e aba lembrados
 - **Presets de scanner** — configurações salvas com pasta de destino
+
+## Logo
+
+`assets/logo.svg` é a versão vetorizada da logo (escalável sem perda). O app embute uma versão PNG em alta resolução gerada a partir dela.
 
 ## Requisitos
 
