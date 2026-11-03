@@ -1,22 +1,167 @@
 """Digitalizacao via WIA (PowerShell) e montagem de PDF."""
+import base64
 import json
 import os
+import queue
 import subprocess
+import threading
+import time
 
 
-def _ps(script):
-    """Executa PowerShell sem exibir janela para o usuário."""
+# PowerShell
+# Uma unica sessao do PowerShell fica aberta e recebe cada script por stdin.
+# Evita o custo de abrir um processo novo a cada digitalizacao (~1 a 2 s).
+# Protocolo: cada script vai em uma linha, codificado em base64; a resposta
+# volta em uma linha "<<OK:id>>base64" ou "<<ERR:id>>base64".
+
+class SessaoIndisponivel(Exception):
+    """A sessao nao pode ser usada; o script ainda nao foi executado."""
+
+
+class ErroScript(Exception):
+    """O script rodou e terminou com erro."""
+
+
+def _opcoes_janela_oculta():
+    if os.name != "nt":
+        return {}
     si = subprocess.STARTUPINFO()
-    si.dwFlags  |= subprocess.STARTF_USESHOWWINDOW
-    si.wShowWindow = 0   # SW_HIDE
+    si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    si.wShowWindow = 0
+    return {"startupinfo": si, "creationflags": subprocess.CREATE_NO_WINDOW}
+
+
+class SessaoPowerShell:
+    COMANDO = ["powershell", "-NoLogo", "-NoProfile", "-NonInteractive",
+               "-ExecutionPolicy", "Bypass", "-Command", "-"]
+
+    def __init__(self, comando=None):
+        self._comando = comando or self.COMANDO
+        self._proc = None
+        self._linhas = None
+        self._lock = threading.Lock()
+        self._seq = 0
+        self.desativada = False
+
+    def _ativa(self):
+        return self._proc is not None and self._proc.poll() is None
+
+    def _iniciar(self):
+        self.encerrar()
+        try:
+            self._proc = subprocess.Popen(
+                self._comando, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, **_opcoes_janela_oculta())
+        except OSError as e:
+            self._proc = None
+            raise SessaoIndisponivel(str(e))
+        self._linhas = queue.Queue()
+        proc, fila = self._proc, self._linhas
+
+        def _ler():
+            for linha in iter(proc.stdout.readline, b""):
+                fila.put(linha.decode("ascii", "ignore").strip())
+            fila.put(None)
+        threading.Thread(target=_ler, daemon=True).start()
+
+    def executar(self, script, timeout=180):
+        with self._lock:
+            if not self._ativa():
+                self._iniciar()
+            self._seq += 1
+            ident = str(self._seq)
+            b64 = base64.b64encode(script.encode("utf-8")).decode("ascii")
+            linha = (
+                "$__c=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + b64 + "'));"
+                "try{$__o=(& ([scriptblock]::Create($__c)) | Out-String);"
+                "[Console]::Out.WriteLine('<<OK:" + ident + ">>'+[Convert]::ToBase64String("
+                "[Text.Encoding]::UTF8.GetBytes($__o)))}"
+                "catch{[Console]::Out.WriteLine('<<ERR:" + ident + ">>'+[Convert]::ToBase64String("
+                "[Text.Encoding]::UTF8.GetBytes($_.Exception.Message)))};"
+                "[Console]::Out.Flush()\n")
+            try:
+                self._proc.stdin.write(linha.encode("ascii"))
+                self._proc.stdin.flush()
+            except OSError as e:
+                self.encerrar()
+                raise SessaoIndisponivel(str(e))
+
+            limite = time.monotonic() + timeout
+            ok, erro = "<<OK:" + ident + ">>", "<<ERR:" + ident + ">>"
+            while True:
+                resta = limite - time.monotonic()
+                if resta <= 0:
+                    self.encerrar()
+                    raise ErroScript("Tempo esgotado aguardando o scanner.")
+                try:
+                    resp = self._linhas.get(timeout=resta)
+                except queue.Empty:
+                    continue
+                if resp is None:
+                    self.encerrar()
+                    raise ErroScript("O PowerShell foi encerrado inesperadamente.")
+                if resp.startswith(ok):
+                    return base64.b64decode(resp[len(ok):]).decode("utf-8", "replace")
+                if resp.startswith(erro):
+                    raise ErroScript(base64.b64decode(resp[len(erro):]).decode("utf-8", "replace"))
+
+    def encerrar(self):
+        proc, self._proc = self._proc, None
+        if proc is None:
+            return
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+
+_sessao = SessaoPowerShell()
+
+
+def _ps_avulso(script, timeout=180):
+    """Executa o script em um processo proprio (modo antigo, usado como reserva)."""
     result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive",
          "-ExecutionPolicy", "Bypass", "-Command", script],
-        capture_output=True, text=True, timeout=120,
-        startupinfo=si,
-        creationflags=subprocess.CREATE_NO_WINDOW,
-    )
+        capture_output=True, text=True, timeout=timeout,
+        **_opcoes_janela_oculta())
     return result.stdout.strip(), result.stderr.strip()
+
+
+def _ps(script, timeout=180):
+    """Executa um script PowerShell. Retorna (saida, erro)."""
+    if _sessao.desativada:
+        return _ps_avulso(script, timeout)
+    try:
+        return _sessao.executar(script, timeout).strip(), ""
+    except ErroScript as e:
+        return "", str(e)
+    except SessaoIndisponivel:
+        return _ps_avulso(script, timeout)
+
+
+def aquecer_powershell():
+    """Abre a sessao em segundo plano para o primeiro scan ser rapido."""
+    def _abrir():
+        try:
+            _sessao.executar("$null", timeout=30)
+        except Exception:
+            # Sessao nao respondeu: todos os scripts passam a usar processo proprio
+            _sessao.desativada = True
+            _sessao.encerrar()
+    threading.Thread(target=_abrir, daemon=True).start()
+
+
+def encerrar_powershell():
+    _sessao.encerrar()
+
 
 def scanner_listar_dispositivos():
     """Retorna lista de (nome, deviceId) dos scanners WIA disponíveis."""
@@ -32,7 +177,10 @@ for ($i = 1; $i -le $dm.DeviceInfos.Count; $i++) {
 }
 $result -join ';;'
 """
-    out, err = _ps(script)
+    try:
+        out, err = _ps(script, timeout=60)
+    except Exception:
+        return []
     if not out.strip():
         return []
     devices = []
@@ -163,6 +311,35 @@ def scanner_uma_pagina(tmp_dir, nome_arquivo,
         except Exception:
             pass
     return paths
+
+
+def pagina_em_branco(caminho, limiar=0.0001):
+    """
+    Indica se a pagina digitalizada esta em branco.
+    Analisa em metade da resolucao, ignora 5% de margem (sombras de borda),
+    remove pontos isolados de poeira e mede a fracao de pixels escuros.
+    O limite e conservador: na duvida, a pagina e mantida.
+    """
+    from PIL import Image, ImageFilter
+    with Image.open(caminho) as im:
+        g = im.convert("L")
+    w, h = g.size
+    if max(w, h) > 1800:
+        g = g.resize((w // 2, h // 2), Image.BILINEAR)
+        w, h = g.size
+    mx, my = int(w * 0.05), int(h * 0.05)
+    g = g.crop((mx, my, w - mx, h - my)).filter(ImageFilter.MedianFilter(3))
+    hist = g.histogram()
+    total = sum(hist) or 1
+    acum, fundo = 0, 255
+    for v, n in enumerate(hist):
+        acum += n
+        if acum >= total / 2:
+            fundo = v
+            break
+    # Escuro: abaixo de 75% do tom do papel; tolera papel amarelado e verso vazado claro
+    escuros = sum(hist[:int(fundo * 0.75)])
+    return escuros / total < limiar
 
 
 def tifs_para_pdf(tif_paths, pdf_path, resolucao=300):

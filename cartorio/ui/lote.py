@@ -4,9 +4,11 @@ import re
 import threading
 import time
 import tkinter as tk
+from tkinter import ttk
 from tkinter import messagebox
 
 from ..tema import T, FONT, FONT_B, FONT_SM, FONT_XS
+from .. import historico
 from ..arquivos import listar_para_lote
 
 
@@ -18,6 +20,7 @@ class JanelaLote(tk.Toplevel):
         self.configure(bg=T("BG"))
         self.grab_set()
         self.resizable(True, True)
+        self.tipo      = tipo
         self.pasta     = pasta
         self.extensoes = extensoes
         self.num_inicio = proximo_numero
@@ -66,8 +69,7 @@ class JanelaLote(tk.Toplevel):
                                    bg=T("LOG_BG"), fg=T("LOG_FG"),
                                    selectbackground=T("ACCENT"),
                                    relief="flat", bd=0, activestyle="none")
-        sb = tk.Scrollbar(lf, orient="vertical", command=self.listbox.yview,
-                          bg=T("CARD"), troughcolor=T("BG"), relief="flat", bd=0)
+        sb = ttk.Scrollbar(lf, orient="vertical", command=self.listbox.yview)
         sb.pack(side="right", fill="y")
         self.listbox.pack(side="left", fill="both", expand=True, padx=8, pady=6)
         self.listbox.configure(yscrollcommand=sb.set)
@@ -126,7 +128,8 @@ class JanelaLote(tk.Toplevel):
             return
         if not messagebox.askyesno(
             "Confirmar",
-            f"Renomear {len(self._arquivos)} arquivo(s) a partir de {self.num_var.get()}?\n\nEsta ação não pode ser desfeita.",
+            f"Renomear {len(self._arquivos)} arquivo(s) a partir de {self.num_var.get()}?\n\n"
+            "Cada renomeação fica no histórico e pode ser desfeita depois.",
             parent=self
         ): return
         self.btn_exec.configure(state="disabled")
@@ -147,6 +150,7 @@ class JanelaLote(tk.Toplevel):
                 numero += 1
             try:
                 os.rename(orig, os.path.join(self.pasta, novo))
+                historico.registrar(historico.LOTE, self.tipo, self.pasta, nome, novo)
                 renomeados += 1; numero += 1
                 pct = int((i + 1) / total * 100)
                 self.after(0, lambda p=pct, n=novo, o=nome:

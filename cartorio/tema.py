@@ -102,3 +102,49 @@ def carregar_logo(altura, escuro=None):
     img = Image.open(io.BytesIO(dados)).convert("RGBA")
     larg = max(1, round(img.width * altura / img.height))
     return ImageTk.PhotoImage(img.resize((larg, altura), Image.LANCZOS))
+
+
+def aplicar_estilo_ttk(root):
+    """Estilo dos widgets ttk (combobox, tabela, barra de rolagem) no tema atual."""
+    from tkinter import ttk
+    st = ttk.Style(root)
+    st.theme_use("clam")
+    fundo, campo, borda = T("CARD"), T("ENTRY_BG"), T("BORDER")
+
+    st.configure("TCombobox", fieldbackground=campo, background=fundo,
+                 foreground=T("TEXT"), arrowcolor=T("SUBTEXT"), bordercolor=borda,
+                 lightcolor=campo, darkcolor=campo, selectbackground=campo,
+                 selectforeground=T("TEXT"), padding=(8, 5), arrowsize=13)
+    st.map("TCombobox",
+           fieldbackground=[("disabled", T("CARD")), ("readonly", campo)],
+           foreground=[("disabled", T("MUTED")), ("readonly", T("TEXT"))],
+           background=[("disabled", T("CARD")), ("active", T("ACCENT2")), ("readonly", fundo)],
+           arrowcolor=[("disabled", T("MUTED"))],
+           bordercolor=[("focus", T("ACCENT"))],
+           lightcolor=[("focus", campo)], darkcolor=[("focus", campo)],
+           selectbackground=[("readonly", campo)],
+           selectforeground=[("readonly", T("TEXT"))])
+    # Lista suspensa do combobox (widget Tk classico)
+    root.option_add("*TCombobox*Listbox.background", T("CARD"))
+    root.option_add("*TCombobox*Listbox.foreground", T("TEXT"))
+    root.option_add("*TCombobox*Listbox.selectBackground", T("ACCENT"))
+    root.option_add("*TCombobox*Listbox.selectForeground", T("TEXT_ON_ACCENT"))
+    root.option_add("*TCombobox*Listbox.font", FONT_SM)
+    root.option_add("*TCombobox*Listbox.borderWidth", 0)
+    root.option_add("*TCombobox*Listbox.relief", "flat")
+
+    st.configure("Treeview", background=T("PANEL"), fieldbackground=T("PANEL"),
+                 foreground=T("TEXT"), bordercolor=borda, lightcolor=T("PANEL"),
+                 darkcolor=T("PANEL"), rowheight=24, font=FONT_SM)
+    st.map("Treeview", background=[("selected", T("ACCENT"))],
+           foreground=[("selected", T("TEXT_ON_ACCENT"))])
+    st.configure("Treeview.Heading", background=T("CARD"), foreground=T("SUBTEXT"),
+                 bordercolor=borda, lightcolor=T("CARD"), darkcolor=T("CARD"),
+                 relief="flat", font=("Segoe UI", 8, "bold"), padding=(6, 5))
+    st.map("Treeview.Heading", background=[("active", T("ACCENT2"))])
+
+    for orient in ("Vertical", "Horizontal"):
+        st.configure(f"{orient}.TScrollbar", background=T("CARD"), troughcolor=T("BG"),
+                     bordercolor=T("BG"), lightcolor=T("CARD"), darkcolor=T("CARD"),
+                     arrowcolor=T("MUTED"), gripcount=0)
+        st.map(f"{orient}.TScrollbar", background=[("active", T("ACCENT2"))])

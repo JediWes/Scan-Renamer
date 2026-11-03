@@ -28,6 +28,8 @@ class AbaDeclaracao(tk.Frame):
         self.tipo = tipo; self.app_log = app_log; self.get_prefs = get_prefs
         self.observer = None; self.monitorando = False
         self.proximo_numero = 0; self.total_renomeados = 0
+        # Protege a numeracao entre monitoramento, lote e scanner
+        self.lock_numero = threading.RLock()
         self._flash_job = None; self._preview_ref = None; self._ultimo_caminho = None
         cfg = carregar_config().get(tipo, {})
         _p = cfg.get("pasta", ""); _n = cfg.get("numero", "image000001")
@@ -35,6 +37,7 @@ class AbaDeclaracao(tk.Frame):
         self.pasta_var = tk.StringVar(value=_p)
         self.num_var   = tk.StringVar(value=_n)
         self.count_var = tk.StringVar(value="—")
+        self.proximo_numero = self._numero_digitado() or 0
         self._build()
         if _p and os.path.isdir(_p): self._atualizar_contador_pasta()
 
@@ -236,7 +239,7 @@ class AbaDeclaracao(tk.Frame):
         prefs = self.get_prefs()
         JanelaLote(self, self.tipo, p,
                    prefs.get("extensoes", EXTENSOES_PADRAO),
-                   self.proximo_numero,
+                   self._numero_atual(),
                    self._lote_concluido)
 
     def _lote_concluido(self, novo_proximo):
@@ -324,16 +327,71 @@ class AbaDeclaracao(tk.Frame):
         self.log("── Monitoramento encerrado ───────────────────────", "info")
         self._atualizar_contador_pasta(); self._persistir()
 
+    def _numero_digitado(self):
+        m = re.fullmatch(r"image(\d{6})", self.num_var.get().strip().lower())
+        return int(m.group(1)) if m else None
+
+    def _numero_atual(self):
+        """Proximo numero: o do monitoramento se ativo, senao o digitado no campo."""
+        if self.monitorando:
+            return self.proximo_numero
+        n = self._numero_digitado()
+        return n if n is not None else self.proximo_numero
+
     def _persistir(self):
-        salvar_config(self.tipo, self.pasta_var.get().strip(), f"image{self.proximo_numero:06d}")
+        salvar_config(self.tipo, self.pasta_var.get().strip(), f"image{self._numero_atual():06d}")
+
+    # Integracao com o scanner e com o desfazer
+
+    def pasta_valida(self):
+        p = self.pasta_var.get().strip()
+        return p if p and os.path.isdir(p) else None
+
+    def previsao_proximo(self, ext=".pdf"):
+        """Nome que o proximo scan recebera, sem reservar."""
+        p = self.pasta_valida()
+        n = self._numero_atual()
+        if p:
+            while os.path.exists(os.path.join(p, f"image{n:06d}{ext}")):
+                n += 1
+        return f"image{n:06d}{ext}"
+
+    def reservar_numero(self, ext):
+        """Reserva o proximo imageNNNNNN livre. Retorna (caminho, numero)."""
+        p = self.pasta_valida()
+        if not p:
+            raise ValueError(f"A pasta de {self.tipo} não está configurada.")
+        with self.lock_numero:
+            n = self._numero_atual()
+            while os.path.exists(os.path.join(p, f"image{n:06d}{ext}")):
+                n += 1
+            self.proximo_numero = n + 1
+            self.num_var.set(f"image{n + 1:06d}")
+            self._persistir()
+        return os.path.join(p, f"image{n:06d}{ext}"), n
+
+    def devolver_numero(self, n):
+        """Desfaz uma reserva ou renomeacao se ela ainda for a ultima numeracao usada."""
+        with self.lock_numero:
+            if self._numero_atual() == n + 1:
+                self.proximo_numero = n
+                self.num_var.set(f"image{n:06d}")
+                self._persistir()
+                self.atualizar_contador()
+
+    def registrar_scan(self, caminho):
+        self.log(f"Scan salvo em {self.tipo}: {os.path.basename(caminho)}", "ok")
+        self._atualizar_contador_pasta()
+        self.flash_notificacao(os.path.basename(caminho), caminho)
 
     def log(self, msg, tag="info"): self.app_log(msg, tag)
 
     def atualizar_contador(self):
         def _u():
-            self.lbl_counter.configure(
-                text=f"{self.total_renomeados} renomeados  ·  próx image{self.proximo_numero:06d}")
-            self.num_var.set(f"image{self.proximo_numero:06d}")
+            if self.monitorando:
+                self.lbl_counter.configure(
+                    text=f"{self.total_renomeados} renomeados  ·  próx image{self.proximo_numero:06d}")
+            self.num_var.set(f"image{self._numero_atual():06d}")
             self._atualizar_contador_pasta()
         self.after(0, _u)
 

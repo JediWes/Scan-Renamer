@@ -24,3 +24,6 @@ desktop.ini
 
 # Log de erros
 erros.log
+
+# Historico de renomeacoes (dados locais)
+historico.csv

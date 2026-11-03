@@ -1,17 +1,20 @@
 """Janela principal."""
 import os
+import re
 import time
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import ttk, messagebox
 
-from ..tema import T, FONT_SM, FONT_XS, carregar_logo
-
-from .. import tema
+from .. import historico, tema
 from ..config import carregar_preferencias, salvar_preferencias
 from ..constantes import VERSAO, TIPOS, EXTENSOES_PADRAO
+from ..renomeador import ignorar_temporariamente
+from ..scanner import aquecer_powershell, encerrar_powershell
+from ..tema import T, FONT_SM, FONT_XS, aplicar_estilo_ttk, carregar_logo
 from .aba_declaracao import AbaDeclaracao
 from .aba_scanner import AbaScanner
 from .configuracoes import TelaConfiguracoes
+from .historico import JanelaHistorico
 from .splash import SplashScreen
 
 
@@ -44,6 +47,7 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._fechar)
         self._build_ui()
         self._bind_shortcuts()
+        aquecer_powershell()
         if self._prefs["aba_principal"] in self._main_frames:
             self._sel_main(self._prefs["aba_principal"])
         splash = SplashScreen(self)
@@ -66,6 +70,55 @@ class App(tk.Tk):
         self.bind_all("<Control-comma>", lambda e: self._abrir_configs())
         self.bind_all("<Control-l>",     lambda e: self._limpar_log())
         self.bind_all("<F1>",            lambda e: self._mostrar_atalhos())
+        self.bind_all("<F7>",            lambda e: self._digitalizar_atalho())
+        self.bind_all("<Control-z>",     lambda e: self._desfazer_ultima())
+        self.bind_all("<Control-h>",     lambda e: self._abrir_historico())
+
+    def _digitalizar_atalho(self):
+        if self.grab_current() is None:
+            self._sel_main("Scanner")
+            self._aba_scanner.digitalizar()
+
+    def trazer_para_frente(self):
+        """Chamado quando outra instancia tenta abrir: mostra esta janela."""
+        self.deiconify()
+        if self.state() == "iconic":
+            self.state("normal")
+        self.lift()
+        self.attributes("-topmost", True)
+        self.after(300, lambda: self.attributes("-topmost", False))
+        self.focus_force()
+
+    # Historico
+
+    def _abrir_historico(self):
+        JanelaHistorico(self, self._desfazer_ultima)
+
+    def _desfazer_ultima(self, confirmar=True, parent=None):
+        """Reverte a ultima renomeacao (monitoramento ou lote). Retorna True se desfez."""
+        parent = parent or self
+        entrada = historico.ultima_desfazivel()
+        if not entrada:
+            messagebox.showinfo("Desfazer", "Não há renomeações para desfazer.", parent=parent)
+            return False
+        if confirmar and not messagebox.askyesno(
+                "Desfazer última renomeação",
+                f"Voltar {entrada['para']} para {entrada['de']}?\n\n"
+                f"Pasta: {entrada['pasta']}\nRenomeado em: {entrada['data_hora']}",
+                parent=parent):
+            return False
+        ok, msg = historico.desfazer(entrada, antes_de_renomear=ignorar_temporariamente)
+        if not ok:
+            messagebox.showerror("Desfazer", msg, parent=parent)
+            self._log_global("Não foi possível desfazer: " + msg, "err")
+            return False
+        self._log_global("Desfeito: " + msg, "warn")
+        aba = self.abas.get(entrada["tipo"])
+        m = re.fullmatch(r"image(\d{6})\.\w+", entrada["para"], re.IGNORECASE)
+        if aba and m:
+            aba.devolver_numero(int(m.group(1)))
+            aba._atualizar_contador_pasta()
+        return True
 
     def _aba_ativa(self):
         return self.abas[self._tab_ativa_var.get()]
@@ -81,6 +134,9 @@ class App(tk.Tk):
             "Ctrl+O      Escolher pasta\n"
             "Ctrl+,      Abrir configurações\n"
             "Ctrl+L      Limpar log\n"
+            "F7          Digitalizar\n"
+            "Ctrl+Z      Desfazer última renomeação\n"
+            "Ctrl+H      Histórico\n"
             "F1          Esta janela", parent=self)
 
     # Configs
@@ -209,10 +265,12 @@ class App(tk.Tk):
         self._prefs["aba_principal"] = self._main_tab_var.get()
         salvar_preferencias(self._prefs)
         self._aba_scanner._limpar_sessao()
+        encerrar_powershell()
         self.destroy()
 
     # UI
     def _build_ui(self):
+        aplicar_estilo_ttk(self)
         # Cabecalho
         hdr = tk.Frame(self, bg=T("SIDEBAR"))
         hdr.pack(fill="x")
@@ -230,6 +288,7 @@ class App(tk.Tk):
         bf.pack(side="right")
         tema_ico = "Modo claro" if tema.tema_atual() == "escuro" else "Modo escuro"
         for txt, cmd in [(tema_ico, self._toggle_tema),
+                         ("Histórico", self._abrir_historico),
                          ("Configurações", self._abrir_configs),
                          ("Atalhos", self._mostrar_atalhos)]:
             tk.Button(bf, text=txt, font=FONT_SM,
@@ -256,6 +315,8 @@ class App(tk.Tk):
 
         def _sel_main(nome):
             self._main_tab_var.set(nome)
+            if nome == "Scanner" and hasattr(self, "_aba_scanner"):
+                self._aba_scanner.atualizar_info_destino()
             for n, f in self._main_frames.items():
                 if n == nome: f.pack(fill="both", expand=True)
                 else:         f.pack_forget()
@@ -339,6 +400,11 @@ class App(tk.Tk):
                   relief="flat", cursor="hand2", padx=8, pady=2, bd=0,
                   activebackground=T("ACCENT"), activeforeground="white",
                   command=self._limpar_log).pack(side="right")
+        tk.Button(lh, text="Desfazer última  [Ctrl+Z]", font=FONT_XS,
+                  bg=T("BTN_SEC_BG"), fg=T("BTN_SEC_FG"),
+                  relief="flat", cursor="hand2", padx=8, pady=2, bd=0,
+                  activebackground=T("ACCENT"), activeforeground="white",
+                  command=self._desfazer_ultima).pack(side="right", padx=(0, 6))
         lw = tk.Frame(ren_body, bg=T("LOG_BG"),
                       highlightbackground=T("BORDER"), highlightthickness=1)
         lw.pack(fill="both", expand=True)
@@ -349,9 +415,7 @@ class App(tk.Tk):
                                 selectbackground=T("ACCENT"),
                                 insertbackground=T("TEXT"))
         self.log_text.pack(side="left", fill="both", expand=True)
-        sb = tk.Scrollbar(lw, orient="vertical", command=self.log_text.yview,
-                          bg=T("CARD"), troughcolor=T("BG"),
-                          activebackground=T("ACCENT"), relief="flat", bd=0)
+        sb = ttk.Scrollbar(lw, orient="vertical", command=self.log_text.yview)
         sb.pack(side="right", fill="y")
         self.log_text.configure(yscrollcommand=sb.set)
         self.log_text.tag_config("ok",   foreground=T("OK"))
@@ -361,7 +425,8 @@ class App(tk.Tk):
 
         # Aba Scanner 
         scanner_frame = self._main_frames["Scanner"]
-        self._aba_scanner = AbaScanner(scanner_frame, self._log_global)
+        self._aba_scanner = AbaScanner(scanner_frame, self._log_global,
+                                       obter_aba=self.abas.get)
         self._aba_scanner.pack(fill="both", expand=True)
 
         # Seleciona Renomeador por padrão
