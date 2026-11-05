@@ -9,8 +9,11 @@ import time
 
 
 # PowerShell
-# Uma unica sessao do PowerShell fica aberta e recebe cada script por stdin.
-# Evita o custo de abrir um processo novo a cada digitalizacao (~1 a 2 s).
+# Um processo do PowerShell e aberto com antecedencia (ja carregado, sem tocar
+# no scanner) e recebe o script por stdin. Cada processo atende UMA operacao com
+# o scanner e e encerrado em seguida: so o fim do processo garante que os
+# objetos COM do WIA sejam liberados e que outros programas possam usar o
+# scanner. Logo depois, um novo processo de reserva e preparado em segundo plano.
 # Protocolo: cada script vai em uma linha, codificado em base64; a resposta
 # volta em uma linha "<<OK:id>>base64" ou "<<ERR:id>>base64".
 
@@ -42,6 +45,7 @@ class SessaoPowerShell:
         self._lock = threading.Lock()
         self._seq = 0
         self.desativada = False
+        self.finalizada = False
 
     def _ativa(self):
         return self._proc is not None and self._proc.poll() is None
@@ -64,7 +68,38 @@ class SessaoPowerShell:
             fila.put(None)
         threading.Thread(target=_ler, daemon=True).start()
 
-    def executar(self, script, timeout=180):
+    def executar(self, script, timeout=180, uso_unico=True):
+        """
+        Executa o script. Com uso_unico (padrao), o processo e encerrado ao
+        final e um novo processo de reserva e preparado em segundo plano.
+        """
+        try:
+            return self._executar(script, timeout)
+        finally:
+            if uso_unico:
+                with self._lock:
+                    self.encerrar()
+                self.preparar()
+
+    def preparar(self):
+        """Abre em segundo plano um processo de reserva, sem usar o scanner."""
+        if self.desativada or self.finalizada:
+            return
+
+        def _abrir():
+            try:
+                self._executar("$null", 30)
+                if self.finalizada:
+                    with self._lock:
+                        self.encerrar()
+            except Exception:
+                # Nao respondeu: os scripts passam a usar processo avulso
+                self.desativada = True
+                with self._lock:
+                    self.encerrar()
+        threading.Thread(target=_abrir, daemon=True).start()
+
+    def _executar(self, script, timeout):
         with self._lock:
             if not self._ativa():
                 self._iniciar()
@@ -148,19 +183,36 @@ def _ps(script, timeout=180):
 
 
 def aquecer_powershell():
-    """Abre a sessao em segundo plano para o primeiro scan ser rapido."""
-    def _abrir():
-        try:
-            _sessao.executar("$null", timeout=30)
-        except Exception:
-            # Sessao nao respondeu: todos os scripts passam a usar processo proprio
-            _sessao.desativada = True
-            _sessao.encerrar()
-    threading.Thread(target=_abrir, daemon=True).start()
+    """Prepara um processo de reserva para a primeira operacao ser rapida."""
+    _sessao.preparar()
 
 
 def encerrar_powershell():
-    _sessao.encerrar()
+    _sessao.finalizada = True
+    with _sessao._lock:
+        _sessao.encerrar()
+
+
+# Codigos de erro do WIA mais comuns, traduzidos para o usuario
+_ERROS_WIA = {
+    "80210006": "O scanner está em uso por outro programa. Feche o outro programa "
+                "(ou aguarde ele terminar) e tente de novo.",
+    "80210003": "Não há folha no scanner. Insira o documento e tente de novo.",
+    "80210002": "Papel enroscado no scanner. Remova a folha e tente de novo.",
+    "80210005": "O scanner está desligado ou desconectado.",
+    "80210015": "Nenhum scanner disponível. Verifique o cabo ou a conexão.",
+    "8021000a": "O scanner está aquecendo. Aguarde alguns segundos e tente de novo.",
+    "80210001": "Erro geral do scanner. Desligue e ligue o scanner e tente de novo.",
+}
+
+
+def traduzir_erro_wia(mensagem):
+    """Troca codigos HRESULT do WIA por mensagens claras; mantem o resto."""
+    baixa = (mensagem or "").lower()
+    for codigo, texto in _ERROS_WIA.items():
+        if codigo in baixa:
+            return texto
+    return mensagem
 
 
 def scanner_listar_dispositivos():
@@ -295,8 +347,10 @@ def scanner_uma_pagina(tmp_dir, nome_arquivo,
     out, err = _ps(script)
 
     if err and not out.strip():
+        if any(c in err.lower() for c in _ERROS_WIA):
+            raise Exception(traduzir_erro_wia(err))
         ultimo = [l.strip() for l in err.strip().splitlines() if l.strip()]
-        raise Exception(ultimo[-1] if ultimo else "Erro no scanner.")
+        raise Exception(traduzir_erro_wia(ultimo[-1]) if ultimo else "Erro no scanner.")
 
     try:
         data = json.loads(out.strip())
