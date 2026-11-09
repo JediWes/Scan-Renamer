@@ -11,11 +11,12 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 from .. import historico
 from ..config import carregar_presets, salvar_presets, PRESET_ULTIMO
 from ..constantes import TIPOS
-from ..scanner import (MODOS_COR_LABEL, pagina_em_branco, scanner_listar_dispositivos,
-                       scanner_uma_pagina, tifs_para_pdf)
+from ..scanner import (MODOS_COR_LABEL, PAPEIS, PAPEL_PADRAO, aparar_sobra, area_limitada,
+                       pagina_em_branco, scanner_listar_dispositivos, scanner_uma_pagina,
+                       tifs_para_pdf)
 from ..tema import T, FONT_SM, FONT_XS, F_MONO_B, F_SECAO
 from . import anim
-from .widgets import BarraAtividade, Botao, CampoTexto
+from .widgets import BarraAtividade, Botao, CampoTexto, Dica
 
 PRESET_MANUAL = "-- manual --"
 
@@ -112,6 +113,13 @@ class AbaScanner(tk.Frame):
         ttk.Combobox(grid, textvariable=self.cor_var, values=list(COR_ROTULO.values()),
                      state="readonly", width=14, font=FONT_SM
                      ).grid(row=0, column=3, sticky="ew", pady=5)
+        lbl("Tamanho do papel", 1, 0)
+        self.papel_var = tk.StringVar(value=PAPEL_PADRAO)
+        cb_papel = ttk.Combobox(grid, textvariable=self.papel_var, values=list(PAPEIS),
+                                state="readonly", font=FONT_SM)
+        cb_papel.grid(row=1, column=1, columnspan=3, sticky="ew", pady=5)
+        Dica(cb_papel, "Para declarações mais compridas que A4, escolha Ofício, Legal ou "
+                       "Máximo. A sobra em branco no fim da folha é removida.")
 
         opcoes = tk.Frame(left, bg=T("BG"))
         opcoes.pack(fill="x", pady=(6, 0))
@@ -126,6 +134,10 @@ class AbaScanner(tk.Frame):
         self._chk_branco = self._check(opcoes, "Remover versos em branco", self.branco_var, 1, 0)
         self._check(opcoes, "Várias páginas por documento", self.multipag_var, 0, 1)
         self._chk_nome = self._check(opcoes, "Perguntar o nome do arquivo", self.perg_nome_var, 1, 1)
+        self.a4_var = tk.BooleanVar(value=False)
+        chk_a4 = self._check(opcoes, "Ajustar ao A4 no PDF", self.a4_var, 2, 0)
+        Dica(chk_a4, "Páginas maiores que A4 são reduzidas proporcionalmente para caber "
+                     "numa folha A4, sem cortar nada (como o ajuste da impressora).")
 
         self._sep(left, topo=14)
 
@@ -302,6 +314,8 @@ class AbaScanner(tk.Frame):
             "remover_branco": self.branco_var.get(),
             "multipag":   self.multipag_var.get(),
             "perg_nome":  self.perg_nome_var.get(),
+            "papel":      self.papel_var.get(),
+            "ajustar_a4": self.a4_var.get(),
             "destino":    self._tipo_destino() or "",
             "pasta":      self.dest_var.get().strip(),
         }
@@ -317,6 +331,9 @@ class AbaScanner(tk.Frame):
         self.branco_var.set(bool(p.get("remover_branco", True)))
         self.multipag_var.set(bool(p.get("multipag", False)))
         self.perg_nome_var.set(bool(p.get("perg_nome", False)))
+        papel = p.get("papel", PAPEL_PADRAO)
+        self.papel_var.set(papel if papel in PAPEIS else PAPEL_PADRAO)
+        self.a4_var.set(bool(p.get("ajustar_a4", False)))
         destino = p.get("destino", "")
         self.destino_var.set(DESTINO_ROTULO.get(destino, DESTINO_PASTA))
         pasta = p.get("pasta", "")
@@ -435,6 +452,7 @@ class AbaScanner(tk.Frame):
         remover   = duplex and self.branco_var.get()
         multipag  = self.multipag_var.get()
         device_id = self._dev_id
+        papel     = self.papel_var.get()
         tmp_dir   = self._tmp_dir
         nome_arq  = "pag_" + str(len(self._tifs_sessao) + 1).zfill(3)
 
@@ -447,7 +465,17 @@ class AbaScanner(tk.Frame):
                     modo_cor     = modo_cor,
                     duplex       = duplex,
                     device_id    = device_id,
+                    papel        = papel,
                 )
+                # Driver entregou menos que o pedido? Verifica antes de aparar a sobra.
+                limitada = None
+                if papel != PAPEL_PADRAO:
+                    for p in novos:
+                        try:
+                            limitada = limitada or area_limitada(p, papel, res)
+                            aparar_sobra(p, res)
+                        except Exception:
+                            pass
                 removidas = 0
                 if remover:
                     # Frente e verso: o driver entrega frente, verso. Apenas versos sao avaliados.
@@ -466,14 +494,19 @@ class AbaScanner(tk.Frame):
                         else:
                             mantidas.append(p)
                     novos = mantidas
-                self.after(0, lambda: self._pos_scan(novos, removidas, multipag))
+                self.after(0, lambda: self._pos_scan(novos, removidas, multipag, limitada, papel))
             except Exception as e:
                 msg = str(e)
                 self.after(0, lambda: self._erro_scan(msg))
         threading.Thread(target=_run, daemon=True).start()
 
-    def _pos_scan(self, novos, removidas, multipag):
+    def _pos_scan(self, novos, removidas, multipag, limitada=None, papel=None):
         self._ocupado = False
+        if limitada:
+            msg = (f"Pedido: {papel}. O scanner entregou {limitada[0]:.1f} × {limitada[1]:.1f} cm. "
+                   "Experimente \"Máximo do scanner\" ou confira o tamanho de papel no driver.")
+            self.log_cb("Área de leitura limitada pelo driver. " + msg, "warn")
+            self.notificar("Página pode ter sido cortada", msg, "aviso", duracao_ms=9000)
         self._atividade.parar()
         antes = len(self._tifs_sessao)
         self._tifs_sessao.extend(novos)
@@ -560,7 +593,8 @@ class AbaScanner(tk.Frame):
             if not pdf_path:
                 return
         try:
-            tifs_para_pdf(self._tifs_sessao, pdf_path, resolucao=res)
+            escala = tifs_para_pdf(self._tifs_sessao, pdf_path, resolucao=res,
+                                   ajustar_a4=self.a4_var.get())
         except Exception as e:
             if aba:
                 aba.devolver_numero(numero)
@@ -573,7 +607,11 @@ class AbaScanner(tk.Frame):
         historico.registrar(historico.SCANNER, tipo or "", pasta, f"{n_pag} página(s)", nome_exib)
         self._limpar_sessao()
         self._set_status("Salvo: " + nome_exib, T("OK"))
-        self.notificar("PDF salvo", f"{nome_exib}  ·  {n_pag} página(s)", "ok")
+        detalhe = ""
+        if escala < 0.995:
+            detalhe = f"  ·  reduzido para {escala * 100:.0f}% (A4)"
+            self.log_cb(f"Página maior que A4 reduzida para {escala * 100:.0f}% em {nome_exib}.", "info")
+        self.notificar("PDF salvo", f"{nome_exib}  ·  {n_pag} página(s){detalhe}", "ok")
         if aba:
             aba.registrar_scan(pdf_path)
             self.atualizar_info_destino()

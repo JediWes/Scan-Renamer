@@ -276,9 +276,47 @@ def aplicar_modo_cor(caminho, modo_cor):
             out.save(caminho, format="TIFF", compression="group4")
 
 
+# Tamanho do papel: rotulo da UI -> (largura, altura) em polegadas.
+# None = nao altera (usa o padrao do driver); "max" = maior area aceita pelo scanner.
+PAPEIS = {
+    "Padrão do driver":           None,
+    "A4 (21 × 29,7 cm)":          (8.268, 11.693),
+    "Ofício (21,6 × 33 cm)":      (8.504, 12.992),
+    "Legal (21,6 × 35,6 cm)":     (8.5, 14.0),
+    "Máximo do scanner":          "max",
+}
+PAPEL_PADRAO = "Padrão do driver"
+A4_POL = (8.268, 11.693)
+
+
+def _linhas_tamanho_papel(papel, resolucao):
+    """Comandos PowerShell para a area de leitura. Valores fora do aceito sao limitados."""
+    tam = PAPEIS.get(papel)
+    if tam is None:
+        return []
+    if tam == "max":
+        larg_mil = "(GetProp $dev.Properties 3076 8500)"     # largura maxima do alimentador
+        alt_mil = "(GetProp $dev.Properties 3077 14000)"     # comprimento maximo
+        larg_px = alt_px = "999999"
+    else:
+        larg_mil, alt_mil = str(round(tam[0] * 1000)), str(round(tam[1] * 1000))
+        larg_px, alt_px = str(round(tam[0] * resolucao)), str(round(tam[1] * resolucao))
+    return [
+        "# Tamanho do papel: personalizado (2) com largura/altura em milesimos de polegada",
+        "SetProp $dev.Properties 3097 2",
+        f"SetProp $dev.Properties 3098 {larg_mil}",
+        f"SetProp $dev.Properties 3099 {alt_mil}",
+        "# Area de leitura em pixels, a partir do canto superior esquerdo",
+        "SetLimitado $item.Properties 6149 0",
+        "SetLimitado $item.Properties 6150 0",
+        f"SetLimitado $item.Properties 6151 {larg_px}",
+        f"SetLimitado $item.Properties 6152 {alt_px}",
+    ]
+
+
 def scanner_uma_pagina(tmp_dir, nome_arquivo,
                         resolucao=300, modo_cor="cor",
-                        duplex=False, device_id=""):
+                        duplex=False, device_id="", papel=PAPEL_PADRAO):
     """
     Escaneia uma passagem do ADF e retorna a lista de TIFs gerados.
     - Simplex: 1 Transfer() = 1 TIF (frente)
@@ -298,6 +336,30 @@ def scanner_uma_pagina(tmp_dir, nome_arquivo,
         "    for ($i = 1; $i -le $col.Count; $i++) {",
         "        if ($col.Item($i).PropertyID -eq $id) {",
         "            try { $col.Item($i).Value = $val } catch {}",
+        "            return",
+        "        }",
+        "    }",
+        "}",
+        "",
+        "function GetProp($col, $id, $padrao) {",
+        "    for ($i = 1; $i -le $col.Count; $i++) {",
+        "        if ($col.Item($i).PropertyID -eq $id) { return $col.Item($i).Value }",
+        "    }",
+        "    return $padrao",
+        "}",
+        "",
+        "# Define a propriedade respeitando o intervalo aceito pelo driver",
+        "function SetLimitado($col, $id, $val) {",
+        "    for ($i = 1; $i -le $col.Count; $i++) {",
+        "        $p = $col.Item($i)",
+        "        if ($p.PropertyID -eq $id) {",
+        "            try {",
+        "                if ($p.IsRange) {",
+        "                    if ($val -gt $p.SubTypeMax) { $val = $p.SubTypeMax }",
+        "                    if ($val -lt $p.SubTypeMin) { $val = $p.SubTypeMin }",
+        "                }",
+        "                $p.Value = $val",
+        "            } catch {}",
         "            return",
         "        }",
         "    }",
@@ -324,8 +386,10 @@ def scanner_uma_pagina(tmp_dir, nome_arquivo,
         f"SetProp $item.Properties 6148 {resolucao}",
         f"SetProp $dev.Properties  3088 {dup_sel}",
         f"SetProp $dev.Properties  3081 {n_imgs}",
+        *_linhas_tamanho_papel(papel, resolucao),
         "",
         "$resultados = @()",
+        "$ultimoErro = $null",
         f"$limite = {n_imgs}",
         "$idx = 1",
         "while ($idx -le $limite) {",
@@ -336,10 +400,14 @@ def scanner_uma_pagina(tmp_dir, nome_arquivo,
         "        $resultados += $dest",
         "        $idx++",
         "    } catch {",
+        "        $ultimoErro = $_.Exception.Message",
         "        break",
         "    }",
         "}",
-        "if ($resultados.Count -eq 0) { throw 'Nenhuma imagem obtida do scanner.' }",
+        "if ($resultados.Count -eq 0) {",
+        "    if ($ultimoErro) { throw $ultimoErro }",
+        "    throw 'Nenhuma imagem obtida do scanner.'",
+        "}",
         "$resultados | ConvertTo-Json -Compress",
     ]
 
@@ -396,8 +464,93 @@ def pagina_em_branco(caminho, limiar=0.0001):
     return escuros / total < limiar
 
 
-def tifs_para_pdf(tif_paths, pdf_path, resolucao=300):
-    """Une uma lista de TIFs em um único PDF multi-página."""
+def tamanho_cm(caminho, resolucao):
+    """(largura, altura) da imagem em cm, pela resolucao do scan."""
+    from PIL import Image
+    with Image.open(caminho) as im:
+        w, h = im.size
+    return w / resolucao * 2.54, h / resolucao * 2.54
+
+
+def area_limitada(caminho, papel, resolucao, tolerancia=0.97):
+    """
+    Se o driver entregou uma imagem bem menor que o tamanho pedido, retorna
+    (larg_cm, alt_cm) entregues; senao None. Ignora 'Padrao' e 'Maximo'.
+    """
+    tam = PAPEIS.get(papel)
+    if not isinstance(tam, tuple):
+        return None
+    w_cm, h_cm = tamanho_cm(caminho, resolucao)
+    if h_cm < tam[1] * 2.54 * tolerancia:
+        return round(w_cm, 1), round(h_cm, 1)
+    return None
+
+
+def aparar_sobra(caminho, resolucao):
+    """
+    Remove do fim da pagina a faixa uniforme que sobra quando a area de leitura
+    e maior que a folha (o fundo pode vir branco ou preto). Topo e laterais nao
+    sao alterados. Retorna True se aparou.
+    """
+    from PIL import Image, ImageChops, ImageFilter, ImageStat
+    with Image.open(caminho) as im:
+        im.load()
+        modo = im.mode
+        g = im.convert("L")
+    w, h = g.size
+    # Cor do fundo: mediana das ultimas linhas
+    faixa = g.crop((0, h - max(4, h // 200), w, h))
+    fundo = int(ImageStat.Stat(faixa).median[0])
+    if ImageStat.Stat(faixa).stddev[0] > 25:
+        return False   # ultima faixa nao e uniforme: a folha vai ate o fim
+    dif = ImageChops.difference(g, Image.new("L", g.size, fundo)).filter(ImageFilter.MedianFilter(3))
+    caixa = dif.point(lambda v: 255 if v > 40 else 0).getbbox()
+    if not caixa:
+        return False
+    # Fundo escuro: a borda da folha aparece, corte rente. Fundo claro: folha e
+    # sobra se confundem, entao fica 1 cm de folga abaixo do ultimo conteudo.
+    margem_mm = 1 if fundo < 100 else 10
+    fim = min(h, caixa[3] + int(margem_mm / 25.4 * resolucao))
+    if fim >= h - int(5 / 25.4 * resolucao):
+        return False   # sobra menor que 5 mm: nao vale aparar
+    with Image.open(caminho) as im:
+        im.load()
+        cortada = im.crop((0, 0, w, fim))
+    if modo == "1":
+        cortada.save(caminho, format="TIFF", compression="group4")
+    else:
+        cortada.save(caminho, format="TIFF", compression="tiff_lzw")
+    return True
+
+
+def ajustar_ao_a4(img, resolucao):
+    """
+    Coloca a imagem numa pagina A4 na mesma resolucao, reduzindo
+    proporcionalmente se ela for maior (como 'ajustar a pagina' da impressora).
+    Retorna (imagem, escala aplicada).
+    """
+    from PIL import Image
+    pw, ph = round(A4_POL[0] * resolucao), round(A4_POL[1] * resolucao)
+    w, h = img.size
+    escala = min(1.0, pw / w, ph / h)
+    modo = img.mode
+    if escala < 1.0:
+        base = img.convert("L") if modo == "1" else img
+        nova = base.resize((max(1, round(w * escala)), max(1, round(h * escala))), Image.LANCZOS)
+        if modo == "1":
+            nova = nova.point(lambda v: 255 if v >= 128 else 0).convert("1", dither=Image.NONE)
+    else:
+        nova = img
+    pagina = Image.new(modo, (pw, ph), 1 if modo == "1" else (255 if modo == "L" else (255, 255, 255)))
+    pagina.paste(nova, ((pw - nova.width) // 2, 0))
+    return pagina, escala
+
+
+def tifs_para_pdf(tif_paths, pdf_path, resolucao=300, ajustar_a4=False):
+    """
+    Une uma lista de TIFs em um unico PDF multipagina. Com ajustar_a4, cada
+    pagina vira A4 e as maiores sao reduzidas para caber. Retorna a menor escala.
+    """
     from PIL import Image
     imgs = []
     for p in tif_paths:
@@ -409,6 +562,16 @@ def tifs_para_pdf(tif_paths, pdf_path, resolucao=300):
             pass
     if not imgs:
         raise Exception("Nenhuma imagem válida para gerar o PDF.")
+    escalas = []
+    if ajustar_a4:
+        ajustadas = []
+        for im in imgs:
+            nova, esc = ajustar_ao_a4(im, resolucao)
+            ajustadas.append(nova)
+            escalas.append(esc)
+            if nova is not im:
+                im.close()
+        imgs = ajustadas
     imgs[0].save(
         pdf_path, format="PDF", save_all=True,
         append_images=imgs[1:], resolution=float(resolucao),
@@ -416,3 +579,5 @@ def tifs_para_pdf(tif_paths, pdf_path, resolucao=300):
     for img in imgs:
         try: img.close()
         except Exception: pass
+    # Menor escala aplicada (1.0 = nenhuma pagina reduzida)
+    return min(escalas) if escalas else 1.0

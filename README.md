@@ -7,6 +7,7 @@ Sistema desktop desenvolvido em Python para automatização do fluxo de digitali
 - **Renomeador automático** — monitora pastas e renomeia arquivos escaneados no padrão `imageNNNNNN` para declarações de Nascimento, Óbito e Natimorto
 - **Scanner integrado** — controle do Brother DS-940DW via WIA (resolução, cor, frente e verso, várias páginas, presets)
 - **Digitalizar direto para a declaração** — o PDF é salvo na pasta do tipo escolhido já com o próximo `imageNNNNNN`
+- **Papéis maiores que A4** — tamanho de leitura Ofício, Legal ou máximo do scanner, com corte automático da sobra no fim da folha; opção de ajustar ao A4 no PDF (reduz sem cortar, como a impressora)
 - **Remoção de versos em branco** — no modo frente e verso, versos vazios são descartados (a frente nunca é removida)
 - **Histórico e desfazer** — toda renomeação e digitalização fica registrada em `historico.csv`; a última renomeação pode ser desfeita (Ctrl+Z)
 - **Visualizador** — preview de imagens e PDFs com zoom
