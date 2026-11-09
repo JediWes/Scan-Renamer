@@ -486,37 +486,81 @@ def area_limitada(caminho, papel, resolucao, tolerancia=0.97):
     return None
 
 
-def aparar_sobra(caminho, resolucao):
+def _faixas_uniformes(g, eixo, tolerancia):
     """
-    Remove do fim da pagina a faixa uniforme que sobra quando a area de leitura
-    e maior que a folha (o fundo pode vir branco ou preto). Topo e laterais nao
-    sao alterados. Retorna True se aparou.
+    Para cada linha (eixo 0) ou coluna (eixo 1) de uma imagem "L", indica se ela
+    e uniforme (todos os pixels quase iguais). Retorna lista de (uniforme, media).
     """
-    from PIL import Image, ImageChops, ImageFilter, ImageStat
-    with Image.open(caminho) as im:
-        im.load()
-        modo = im.mode
-        g = im.convert("L")
+    from PIL import Image
+    if eixo == 1:
+        g = g.transpose(Image.Transpose.TRANSPOSE)
     w, h = g.size
-    # Cor do fundo: mediana das ultimas linhas
-    faixa = g.crop((0, h - max(4, h // 200), w, h))
-    fundo = int(ImageStat.Stat(faixa).median[0])
-    if ImageStat.Stat(faixa).stddev[0] > 25:
-        return False   # ultima faixa nao e uniforme: a folha vai ate o fim
-    dif = ImageChops.difference(g, Image.new("L", g.size, fundo)).filter(ImageFilter.MedianFilter(3))
-    caixa = dif.point(lambda v: 255 if v > 40 else 0).getbbox()
-    if not caixa:
-        return False
-    # Fundo escuro: a borda da folha aparece, corte rente. Fundo claro: folha e
-    # sobra se confundem, entao fica 1 cm de folga abaixo do ultimo conteudo.
-    margem_mm = 1 if fundo < 100 else 10
-    fim = min(h, caixa[3] + int(margem_mm / 25.4 * resolucao))
-    if fim >= h - int(5 / 25.4 * resolucao):
-        return False   # sobra menor que 5 mm: nao vale aparar
+    dados = g.tobytes()
+    res = []
+    for i in range(h):
+        linha = dados[i * w:(i + 1) * w]
+        res.append((max(linha) - min(linha) <= tolerancia, sum(linha) / w))
+    return res
+
+
+def aparar_bordas(caminho, resolucao, tolerancia=3):
+    """
+    Remove o preenchimento que o scanner gera fora da folha quando a area de
+    leitura e maior que o papel. O preenchimento e uma cor perfeitamente
+    uniforme (branca ou preta); o papel escaneado tem textura e ruido, e o
+    conteudo nunca e uniforme, entao nada da folha e cortado.
+    Corta dos quatro lados. Retorna True se aparou.
+    """
+    from PIL import Image
     with Image.open(caminho) as im:
         im.load()
-        cortada = im.crop((0, 0, w, fim))
-    if modo == "1":
+        original = im.copy()
+    w, h = original.size
+    # Reducao por amostragem simples (NEAREST) preserva o ruido do papel
+    f = max(1, max(w, h) // 1400)
+    g = original.convert("L").resize((max(1, w // f), max(1, h // f)), Image.NEAREST)
+    linhas = _faixas_uniformes(g, 0, tolerancia)
+    colunas = _faixas_uniformes(g, 1, tolerancia)
+
+    def limites(faixas):
+        ini = next((i for i, (u, _) in enumerate(faixas) if not u), None)
+        if ini is None:
+            return None
+        fim = len(faixas) - next(i for i, (u, _) in enumerate(reversed(faixas)) if not u)
+        return ini, fim
+
+    lin, col = limites(linhas), limites(colunas)
+    if lin is None or col is None:
+        return False   # pagina inteira uniforme: nao mexe
+    topo, base = lin[0] * f, min(h, lin[1] * f)
+    esq, dir_ = col[0] * f, min(w, col[1] * f)
+    # Ignora cortes menores que 2 mm (nao e preenchimento)
+    minimo = int(2 / 25.4 * resolucao)
+    topo = topo if topo >= minimo else 0
+    esq = esq if esq >= minimo else 0
+    base = base if h - base >= minimo else h
+    dir_ = dir_ if w - dir_ >= minimo else w
+    if (topo, esq, base, dir_) == (0, 0, h, w):
+        return False
+    # Folga de 2 mm so onde o corte encostou em tinta (papel tao branco quanto o
+    # preenchimento): ali a borda real da folha nao foi encontrada. Na borda do
+    # papel o corte fica rente.
+    folga = int(2 / 25.4 * resolucao)
+
+    def tem_tinta(caixa_linha):
+        mn, _ = g.crop(caixa_linha).getextrema()
+        return mn < 100
+
+    li, lf, ci, cf = lin[0], lin[1] - 1, col[0], col[1] - 1
+    caixa = (
+        # Cada borda e avaliada so no trecho que permanece na imagem
+        max(0, esq - (folga if esq and tem_tinta((ci, li, ci + 1, lf + 1)) else 0)),
+        max(0, topo - (folga if topo and tem_tinta((ci, li, cf + 1, li + 1)) else 0)),
+        min(w, dir_ + (folga if dir_ < w and tem_tinta((cf, li, cf + 1, lf + 1)) else 0)),
+        min(h, base + (folga if base < h and tem_tinta((ci, lf, cf + 1, lf + 1)) else 0)),
+    )
+    cortada = original.crop(caixa)
+    if original.mode == "1":
         cortada.save(caminho, format="TIFF", compression="group4")
     else:
         cortada.save(caminho, format="TIFF", compression="tiff_lzw")

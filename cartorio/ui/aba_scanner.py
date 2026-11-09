@@ -11,7 +11,7 @@ from tkinter import ttk, filedialog, messagebox, simpledialog
 from .. import historico
 from ..config import carregar_presets, salvar_presets, PRESET_ULTIMO
 from ..constantes import TIPOS
-from ..scanner import (MODOS_COR_LABEL, PAPEIS, PAPEL_PADRAO, aparar_sobra, area_limitada,
+from ..scanner import (MODOS_COR_LABEL, PAPEIS, PAPEL_PADRAO, aparar_bordas, area_limitada,
                        pagina_em_branco, scanner_listar_dispositivos, scanner_uma_pagina,
                        tifs_para_pdf)
 from ..tema import T, FONT_SM, FONT_XS, F_MONO_B, F_SECAO
@@ -119,7 +119,7 @@ class AbaScanner(tk.Frame):
                                 state="readonly", font=FONT_SM)
         cb_papel.grid(row=1, column=1, columnspan=3, sticky="ew", pady=5)
         Dica(cb_papel, "Para declarações mais compridas que A4, escolha Ofício, Legal ou "
-                       "Máximo. A sobra em branco no fim da folha é removida.")
+                       "Máximo. A borda que o scanner preenche fora da folha é removida.")
 
         opcoes = tk.Frame(left, bg=T("BG"))
         opcoes.pack(fill="x", pady=(6, 0))
@@ -473,7 +473,7 @@ class AbaScanner(tk.Frame):
                     for p in novos:
                         try:
                             limitada = limitada or area_limitada(p, papel, res)
-                            aparar_sobra(p, res)
+                            aparar_bordas(p, res)
                         except Exception:
                             pass
                 removidas = 0
